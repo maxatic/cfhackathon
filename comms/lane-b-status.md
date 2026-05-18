@@ -12,6 +12,12 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-18 18:55
+shipped: Lane B Vercel branch preview verified at https://cf-hackathon-dashboard-jd5c7nc4z-maxatics-projects.vercel.app/
+working: Ready for PR review
+next: Open PR from `lane-b-dashboard` to `main`
+asks: none
+
 ### 2026-05-18 16:02
 shipped: Preview URL checked, it serves old Northstar UI instead of Lane B branch
 working: Need Vercel redeploy from `lane-b-dashboard`
