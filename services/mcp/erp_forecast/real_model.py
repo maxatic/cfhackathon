@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from os import environ
 from pathlib import Path
 from random import Random
+from shutil import copy2
+from sys import platform
 from typing import Any
 
 
@@ -52,6 +55,7 @@ class RealSequenceModel:
         self.current_seq_len = self.max_seq_len - 1
         self._session: Any | None = None
         self._dataset_map: dict[str, Any] | None = None
+        self._import_dir: Path | None = None
 
     def predict(
         self,
@@ -106,7 +110,8 @@ class RealSequenceModel:
 
         import joblib
 
-        artifact_path = str(self.artifact_dir)
+        import_dir = self._prepared_import_dir()
+        artifact_path = str(import_dir)
         if artifact_path not in sys.path:
             sys.path.insert(0, artifact_path)
 
@@ -144,6 +149,38 @@ class RealSequenceModel:
                 "REAL_MODEL_ARTIFACT_DIR. "
                 f"Missing: {', '.join(missing)}"
             )
+
+    def _prepared_import_dir(self) -> Path:
+        if self._import_dir is not None:
+            return self._import_dir
+
+        runtime_source = self._runtime_source()
+        if runtime_source is None:
+            self._import_dir = self.artifact_dir
+            return self._import_dir
+
+        runtime_dir = Path(environ.get("REAL_MODEL_RUNTIME_CACHE", "/tmp/swiftforecast_real_model_runtime"))
+        package_dir = runtime_dir / "pyarmor_runtime_000000"
+        package_dir.mkdir(parents=True, exist_ok=True)
+
+        copy2(self.artifact_dir / "alit_backend.py", runtime_dir / "alit_backend.py")
+        copy2(self.artifact_dir / "pyarmor_runtime_000000" / "__init__.py", package_dir / "__init__.py")
+        copy2(runtime_source, package_dir / "pyarmor_runtime.so")
+
+        self._import_dir = runtime_dir
+        return self._import_dir
+
+    def _runtime_source(self) -> Path | None:
+        runtime_root = self.artifact_dir / "pyarmor_runtime_000000"
+        if platform.startswith("linux"):
+            candidate = runtime_root / "linux_x86_64" / "pyarmor_runtime.so"
+        elif platform == "darwin":
+            candidate = runtime_root / "darwin_universal" / "pyarmor_runtime.so"
+        elif platform.startswith("win"):
+            candidate = runtime_root / "windows_x86_64" / "pyarmor_runtime.pyd"
+        else:
+            candidate = runtime_root / "pyarmor_runtime.so"
+        return candidate if candidate.exists() else None
 
     def _smart_inference_onnx(
         self,
