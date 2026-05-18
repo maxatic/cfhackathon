@@ -19,7 +19,6 @@ from .data import (
     list_segments,
     weekly_series,
 )
-from .model import MiniTransformerForecaster
 from .privacy import anonymize_orders
 
 
