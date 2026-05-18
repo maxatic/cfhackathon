@@ -12,6 +12,12 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-18 15:42
+shipped: Browser smoke test passed, stale MCP service fallback hardened
+working: Mobile responsive check and Vercel preview
+next: Create PR after Lane A confirms endpoint names
+asks: none
+
 ### 2026-05-18 15:36
 shipped: Client list, locked tool coverage, sensor diff, privacy audit, audit refresh polish
 working: Browser smoke test and responsive pass

@@ -17,6 +17,8 @@ import type {
   ScenarioResponse,
 } from "./types";
 
+const SERVICE_TIMEOUT_MS = 1800;
+
 export type PredictRequest = {
   client_id: string;
   start_sequence?: string[];
@@ -60,17 +62,31 @@ async function postMcpService<T>(path: string, input: Record<string, unknown>, f
     return fallback();
   }
 
-  const response = await fetch(`${endpoint}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...input,
-      api_token: process.env.MCP_DEMO_TOKEN ?? "sk_nexus_lab_demo",
-    }),
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SERVICE_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch(`${endpoint}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...input,
+        api_token: process.env.MCP_DEMO_TOKEN ?? "sk_nexus_lab_demo",
+      }),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch {
+    return fallback();
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
+    if (process.env.MCP_REST_STRICT !== "1") {
+      return fallback();
+    }
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
     const detail = payload.error ? `: ${payload.error}` : "";
     throw new Error(`MCP service returned ${response.status}${detail}`);
@@ -85,13 +101,27 @@ export async function requestClients(): Promise<ClientListResponse> {
     return createLocalClients();
   }
 
-  const response = await fetch(`${endpoint}/api/clients`, {
-    method: "GET",
-    headers: { "content-type": "application/json" },
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SERVICE_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch(`${endpoint}/api/clients`, {
+      method: "GET",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch {
+    return createLocalClients();
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
+    if (process.env.MCP_REST_STRICT !== "1") {
+      return createLocalClients();
+    }
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(payload.error ?? `MCP service returned ${response.status}`);
   }

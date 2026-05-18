@@ -63,7 +63,7 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 
 ### Thursday May 21
 - [ ] Vercel production deploy
-- [~] Polish: loading states, error states, empty states
+- [X] Polish: loading states, error states, empty states
 - [ ] Mobile responsive check (judges may glance at phone)
 
 ### Friday May 22
