@@ -5,6 +5,7 @@ import type {
   ForecastRun,
   ModelVersionsResponse,
   ProductOption,
+  RealSequenceResponse,
   RetrainingJob,
   RiskResponse,
 } from "./types";
@@ -377,5 +378,19 @@ export function createLocalAuditEvents(): AuditEventsResponse {
         timestamp,
       },
     ],
+  };
+}
+
+export function createLocalRealSequence(): RealSequenceResponse {
+  const generated = "<dt_1w> s_goggles_basic c_reag_n_butyllithium s_gloves_nitrile_l c_reag_magnesium_turn c_acid_tfa";
+  return {
+    client_id: "nexus_lab_solutions",
+    start_sequence: "<dt_2w> c_solvent_acetonitrile s_beaker_250ml",
+    generated_sequence: generated,
+    tokens: generated.split(" "),
+    max_generate: 30,
+    temperature: 1,
+    top_k: 30,
+    seed: 0,
   };
 }

@@ -31,11 +31,12 @@ import type {
   BeamScenario,
   ForecastRun,
   ModelVersionsResponse,
+  RealSequenceResponse,
   RetrainingJob,
   RiskResponse,
 } from "@/lib/types";
 
-type ActionPanel = "risk" | "models" | "anonymization" | "retraining";
+type ActionPanel = "risk" | "models" | "anonymization" | "retraining" | "realModel";
 type LoadingAction = ActionPanel | "forecast" | "audit" | null;
 
 function formatNumber(value: number): string {
@@ -182,6 +183,7 @@ export function Dashboard() {
   const [risk, setRisk] = useState<RiskResponse>(() => createLocalRisk(products[0].sku, 12, 5));
   const [models, setModels] = useState<ModelVersionsResponse>(() => createLocalModelVersions());
   const [audit, setAudit] = useState<AuditEventsResponse>(() => createLocalAuditEvents());
+  const [realSequence, setRealSequence] = useState<RealSequenceResponse | null>(null);
   const [anonymization, setAnonymization] = useState<AnonymizationResponse | null>(null);
   const [retraining, setRetraining] = useState<RetrainingJob | null>(null);
   const [activePanel, setActivePanel] = useState<ActionPanel>("risk");
@@ -358,7 +360,83 @@ export function Dashboard() {
     }
   }
 
+  async function runRealModel() {
+    setActivePanel("realModel");
+    setPanelError(null);
+    setPanelMessage("Calling mounted CTO ONNX sequence model");
+    setLoadingAction("realModel");
+    try {
+      const result = await postJson<RealSequenceResponse>("/api/real-sequence", {
+        client_id: "nexus_lab_solutions",
+        max_generate: 30,
+        temperature: 1,
+        top_k: 30,
+        seed: 0,
+      });
+      setRealSequence(result);
+      setPanelMessage(`Real model generated ${result.tokens.length} tokens for ${result.client_id}`);
+      setStatus("CTO ONNX model");
+    } catch (caught) {
+      setPanelError(caught instanceof Error ? caught.message : "Real model request failed");
+      setRealSequence(null);
+      setStatus("Real model unavailable");
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
   function renderActionPanel() {
+    if (activePanel === "realModel") {
+      return (
+        <div className="action-stack">
+          <button className="secondary-button" onClick={runRealModel} disabled={loadingAction === "realModel"}>
+            {loadingAction === "realModel" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}
+            Run CTO model
+          </button>
+          {realSequence ? (
+            <>
+              <div className="audit-grid real-model-grid">
+                <div>
+                  <span>Client</span>
+                  <strong>{realSequence.client_id}</strong>
+                </div>
+                <div>
+                  <span>Temperature</span>
+                  <strong>{realSequence.temperature}</strong>
+                </div>
+                <div>
+                  <span>Top K</span>
+                  <strong>{realSequence.top_k}</strong>
+                </div>
+                <div>
+                  <span>Generated tokens</span>
+                  <strong>{realSequence.tokens.length}</strong>
+                </div>
+              </div>
+              <div className="sequence-block">
+                <h4>Start sequence</h4>
+                <p>{realSequence.start_sequence}</p>
+              </div>
+              <div className="sequence-block is-generated">
+                <h4>Generated sequence</h4>
+                <div className="token-list">
+                  {realSequence.tokens.map((token, index) => (
+                    <span key={`${token}-${index}`}>{token}</span>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">Run the CTO model to call the mounted ONNX artifact bundle.</div>
+          )}
+          <p className="panel-copy">
+            This panel calls the mounted NDA bundle through the MCP service REST bridge. If it returns a service
+            error, restart the Docker container with REAL_MODEL_ARTIFACT_DIR pointing at the CTO folder.
+          </p>
+        </div>
+      );
+    }
+
     if (activePanel === "models") {
       return (
         <div className="version-list">
@@ -793,7 +871,9 @@ export function Dashboard() {
                       ? "Model versions"
                       : activePanel === "anonymization"
                         ? "Anonymization report"
-                        : "Retraining"}
+                        : activePanel === "retraining"
+                          ? "Retraining"
+                          : "CTO ONNX model"}
                 </p>
               </div>
               <div className="panel-actions" aria-label="Dashboard actions">
@@ -828,6 +908,14 @@ export function Dashboard() {
                 >
                   <RefreshCcw size={16} aria-hidden="true" />
                   Retrain
+                </button>
+                <button
+                  className={activePanel === "realModel" ? "secondary-button is-active" : "secondary-button"}
+                  onClick={runRealModel}
+                  disabled={loadingAction === "realModel"}
+                >
+                  <Sparkles size={16} aria-hidden="true" />
+                  CTO model
                 </button>
               </div>
             </div>

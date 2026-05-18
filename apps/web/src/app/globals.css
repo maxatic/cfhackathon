@@ -532,6 +532,50 @@ button:disabled {
   font-size: 12px;
 }
 
+.real-model-grid strong {
+  font-size: 16px;
+}
+
+.sequence-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 12px;
+}
+
+.sequence-block h4 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sequence-block p {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.sequence-block.is-generated {
+  background: #1a2119;
+}
+
+.token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.token-list span {
+  border: 1px solid rgba(184, 226, 59, 0.28);
+  border-radius: 8px;
+  background: rgba(184, 226, 59, 0.08);
+  color: var(--green);
+  padding: 6px 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .compact-table {
   min-width: 760px;
 }

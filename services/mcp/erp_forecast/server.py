@@ -328,6 +328,25 @@ async def rest_forecast(request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
+async def rest_real_sequence(request: Request) -> JSONResponse:
+    body = await request.json()
+    try:
+        api_token = body.get("api_token")
+        if api_token:
+            validate_bearer_token(api_token)
+        result = get_real_model().predict(
+            client_id=body.get("client_id", "nexus_lab_solutions"),
+            start_sequence=body.get("start_sequence"),
+            max_generate=int(body.get("max_generate", 30)),
+            temperature=float(body.get("temperature", 1.0)),
+            top_k=int(body.get("top_k", 30)),
+            seed=int(body.get("seed", 42)),
+        ).to_dict()
+    except (KeyError, ValueError, ImportError, RuntimeError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse(result)
+
+
 async def rest_adaptive_forecast(request: Request) -> JSONResponse:
     body = await request.json()
     try:
@@ -470,6 +489,7 @@ def create_app() -> Starlette:
             Route("/healthz", healthz, methods=["GET"]),
             Route("/.well-known/oauth-protected-resource", protected_resource_metadata, methods=["GET"]),
             Route("/api/forecast", rest_forecast, methods=["POST"]),
+            Route("/api/real-sequence", rest_real_sequence, methods=["POST"]),
             Route("/api/adaptive-forecast", rest_adaptive_forecast, methods=["POST"]),
             Route("/api/risk", rest_rank_at_risk, methods=["POST"]),
             Route("/api/anonymize", rest_anonymize, methods=["POST"]),

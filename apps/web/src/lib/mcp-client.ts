@@ -3,6 +3,7 @@ import {
   createLocalAuditEvents,
   createLocalForecast,
   createLocalModelVersions,
+  createLocalRealSequence,
   createLocalRetrainingJob,
   createLocalRisk,
 } from "./demo-data";
@@ -11,6 +12,7 @@ import type {
   AuditEventsResponse,
   ForecastRun,
   ModelVersionsResponse,
+  RealSequenceResponse,
   RetrainingJob,
   RiskResponse,
 } from "./types";
@@ -57,6 +59,15 @@ export type AuditEventsRequest = {
   limit: number;
 };
 
+export type RealSequenceRequest = {
+  client_id: string;
+  start_sequence?: string;
+  max_generate: number;
+  temperature: number;
+  top_k: number;
+  seed: number;
+};
+
 async function postMcpService<T>(path: string, input: Record<string, unknown>, fallback: () => T): Promise<T> {
   const endpoint = process.env.MCP_REST_URL;
   if (!endpoint) {
@@ -74,7 +85,9 @@ async function postMcpService<T>(path: string, input: Record<string, unknown>, f
   });
 
   if (!response.ok) {
-    throw new Error(`MCP service returned ${response.status}`);
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    const detail = payload.error ? `: ${payload.error}` : "";
+    throw new Error(`MCP service returned ${response.status}${detail}`);
   }
 
   return (await response.json()) as T;
@@ -112,4 +125,8 @@ export async function requestRetrainingStatus(input: RetrainingStatusRequest): P
 
 export async function requestAuditEvents(input: AuditEventsRequest): Promise<AuditEventsResponse> {
   return postMcpService("/api/audit-events", input, () => createLocalAuditEvents());
+}
+
+export async function requestRealSequence(input: RealSequenceRequest): Promise<RealSequenceResponse> {
+  return postMcpService("/api/real-sequence", input, () => createLocalRealSequence());
 }

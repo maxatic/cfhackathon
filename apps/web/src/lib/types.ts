@@ -183,3 +183,14 @@ export type AuditEventsResponse = {
   tenant_id: string;
   events: AuditEvent[];
 };
+
+export type RealSequenceResponse = {
+  client_id: string;
+  start_sequence: string;
+  generated_sequence: string;
+  tokens: string[];
+  max_generate: number;
+  temperature: number;
+  top_k: number;
+  seed: number;
+};
