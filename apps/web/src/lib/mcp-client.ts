@@ -3,6 +3,7 @@ import {
   createLocalAuditEvents,
   createLocalForecast,
   createLocalModelVersions,
+  createLocalRealSequence,
   createLocalRetrainingJob,
   createLocalRisk,
 } from "./demo-data";
@@ -11,6 +12,7 @@ import type {
   AuditEventsResponse,
   ForecastRun,
   ModelVersionsResponse,
+  RealSequenceResponse,
   RetrainingJob,
   RiskResponse,
 } from "./types";
@@ -55,6 +57,15 @@ export type RetrainingStatusRequest = {
 export type AuditEventsRequest = {
   tenant_id: string;
   limit: number;
+};
+
+export type RealSequenceRequest = {
+  client_id: string;
+  start_sequence?: string;
+  max_generate: number;
+  temperature: number;
+  top_k: number;
+  seed: number;
 };
 
 async function postMcpService<T>(path: string, input: Record<string, unknown>, fallback: () => T): Promise<T> {
@@ -112,4 +123,8 @@ export async function requestRetrainingStatus(input: RetrainingStatusRequest): P
 
 export async function requestAuditEvents(input: AuditEventsRequest): Promise<AuditEventsResponse> {
   return postMcpService("/api/audit-events", input, () => createLocalAuditEvents());
+}
+
+export async function requestRealSequence(input: RealSequenceRequest): Promise<RealSequenceResponse> {
+  return postMcpService("/api/real-sequence", input, () => createLocalRealSequence());
 }
