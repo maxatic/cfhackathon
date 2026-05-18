@@ -12,6 +12,12 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-18 15:36
+shipped: Client list, locked tool coverage, sensor diff, privacy audit, audit refresh polish
+working: Browser smoke test and responsive pass
+next: Push lane-b-dashboard to GitHub, then continue visual polish
+asks: none
+
 ### 2026-05-18 15:32
 shipped: Basket sequence panel, beam comparison cards, decoder controls
 working: Sensor swap, privacy audit, audit event polish

@@ -14,11 +14,12 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   createLocalAnonymization,
   createLocalAuditEvents,
   createLocalBasketPrediction,
+  createLocalClients,
   createLocalForecastPlan,
   createLocalPersonalization,
   createLocalScenarios,
@@ -30,6 +31,7 @@ import type {
   AnonymizationResponse,
   AuditEventsResponse,
   BasketPrediction,
+  ClientListResponse,
   ForecastPlanResponse,
   PersonalizationResponse,
   ScenarioResponse,
@@ -145,6 +147,7 @@ export function Dashboard() {
   const [personalization, setPersonalization] = useState<PersonalizationResponse>(() => createLocalPersonalization());
   const [anonymization, setAnonymization] = useState<AnonymizationResponse>(() => createLocalAnonymization());
   const [audit, setAudit] = useState<AuditEventsResponse>(() => createLocalAuditEvents());
+  const [clients, setClients] = useState<ClientListResponse>(() => createLocalClients());
   const [activePanel, setActivePanel] = useState<ActionPanel>("plan");
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
   const [status, setStatus] = useState("Local fallback ready");
@@ -157,8 +160,36 @@ export function Dashboard() {
     [prediction.generated_tokens],
   );
   const bestScenario = scenarios.scenarios[0];
+  const activeClient = clients.clients.find((client) => client.client_id === clientId) ?? demoClient;
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadClients() {
+      try {
+        const response = await fetch("/api/clients", { method: "GET" });
+        const payload = (await response.json().catch(() => ({}))) as ClientListResponse & { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? `Client list returned ${response.status}`);
+        }
+        if (!ignore) {
+          setClients(payload);
+        }
+      } catch {
+        if (!ignore) {
+          setClients(createLocalClients());
+        }
+      }
+    }
+
+    void loadClients();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   async function refreshAuditEvents() {
+    setLoadingAction("audit");
     try {
       const nextAudit = await postJson<AuditEventsResponse>("/api/audit", {
         client_id: clientId,
@@ -167,6 +198,8 @@ export function Dashboard() {
       setAudit(nextAudit);
     } catch {
       setAudit((current) => current);
+    } finally {
+      setLoadingAction(null);
     }
   }
 
@@ -464,7 +497,11 @@ export function Dashboard() {
         <div className="control">
           <label htmlFor="client">Client</label>
           <select id="client" value={clientId} disabled>
-            <option value={demoClient.client_id}>{demoClient.client_id}</option>
+            {clients.clients.map((client) => (
+              <option key={client.client_id} value={client.client_id}>
+                {client.client_id}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -568,7 +605,7 @@ export function Dashboard() {
         <section className="metrics" aria-label="Prediction summary">
           <div className="card metric">
             <span>Client</span>
-            <strong>{demoClient.display_name}</strong>
+            <strong>{activeClient.display_name}</strong>
           </div>
           <div className="card metric">
             <span>Generated products</span>
@@ -581,6 +618,56 @@ export function Dashboard() {
           <div className="card metric">
             <span>Model</span>
             <strong>{prediction.model_version}</strong>
+          </div>
+        </section>
+
+        <section className="grid">
+          <div className="card">
+            <div className="panel-header">
+              <h3>Client directory</h3>
+              <span className="pill">
+                <Database size={14} aria-hidden="true" />
+                list_clients
+              </span>
+            </div>
+            <div className="event-list">
+              {clients.clients.map((client) => (
+                <div className="event-item" key={client.client_id}>
+                  <div className="row-title">
+                    <h4>{client.display_name}</h4>
+                    <span className={`status-chip ${client.status}`}>{client.status}</span>
+                  </div>
+                  <p>{client.client_id}</p>
+                  <p>{client.domain}, last order week {client.last_order_week}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="panel-header">
+              <h3>Tool coverage</h3>
+              <span className="pill">
+                <CheckCircle2 size={14} aria-hidden="true" />
+                locked surface
+              </span>
+            </div>
+            <div className="tool-grid">
+              {[
+                "predict_next_basket",
+                "predict_scenarios",
+                "forecast_plan",
+                "personalize_client",
+                "anonymize_and_tokenize_orders",
+                "list_clients",
+                "list_audit_events",
+              ].map((tool) => (
+                <div className="tool-chip" key={tool}>
+                  <CheckCircle2 size={14} aria-hidden="true" />
+                  <span>{tool}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 

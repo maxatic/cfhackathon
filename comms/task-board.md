@@ -54,16 +54,16 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 ### Tuesday May 19
 - [X] Basket sequence display panel (groups tokens by time delta)
 - [X] Scenario comparison panel (3+ beams side by side)
-- [~] Wire new MCP tools through REST mirror routes in apps/web/src/app/api/
+- [X] Wire new MCP tools through REST mirror routes in apps/web/src/app/api/
 
 ### Wednesday May 20
-- [ ] Sensor swap panel (before/after with visual diff)
-- [ ] Anonymization audit panel (shows PII scrub + token mapping)
+- [X] Sensor swap panel (before/after with visual diff)
+- [X] Anonymization audit panel (shows PII scrub + token mapping)
 - [ ] Vercel preview deployment URL working
 
 ### Thursday May 21
 - [ ] Vercel production deploy
-- [ ] Polish: loading states, error states, empty states
+- [~] Polish: loading states, error states, empty states
 - [ ] Mobile responsive check (judges may glance at phone)
 
 ### Friday May 22
