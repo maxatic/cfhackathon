@@ -15,13 +15,6 @@ from .auth import AuthorizationError, validate_bearer_token
 from .real_model import RealSequenceModel
 
 
-MCP_ENDPOINT = getenv("MCP_ENDPOINT", "http://localhost:8000/mcp")
-AUTH_SERVER = getenv("SUPABASE_AUTH_SERVER", "https://example.supabase.co/auth/v1")
-RESOURCE_METADATA_URL = getenv(
-    "MCP_RESOURCE_METADATA_URL",
-    "http://localhost:8000/.well-known/oauth-protected-resource",
-)
-
 mcp = FastMCP("SwiftForecast ERP", stateless_http=True, json_response=True)
 _REAL_MODEL: RealSequenceModel | None = None
 
@@ -87,24 +80,6 @@ async def healthz(_request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
 
 
-async def protected_resource_metadata(_request: Request) -> JSONResponse:
-    return JSONResponse(
-        {
-            "resource": MCP_ENDPOINT,
-            "authorization_servers": [AUTH_SERVER] if AUTH_SERVER != "api-key-demo" else [],
-            "scopes_supported": ["forecast", "anonymize", "retrain", "models", "audit"],
-            "bearer_methods_supported": ["header"],
-            "api_key_supported": True,
-            "api_key_header": "Authorization: Bearer <tenant-scoped-api-key>",
-            "authorization_notes": (
-                "This hackathon demo validates static tenant-scoped API keys. "
-                "Supabase OAuth/JWKS validation is a planned production extension."
-            ),
-            "resource_documentation": "https://github.com/modelcontextprotocol/specification",
-        }
-    )
-
-
 async def rest_real_sequence(request: Request) -> JSONResponse:
     body = await request.json()
     try:
@@ -136,17 +111,7 @@ class BearerAuthMiddleware:
             try:
                 validate_bearer_token(token)
             except AuthorizationError:
-                response = Response(
-                    "Unauthorized",
-                    status_code=401,
-                    headers={
-                        "WWW-Authenticate": (
-                            f'Bearer realm="mcp", resource_metadata="{RESOURCE_METADATA_URL}", '
-                            'scope="forecast anonymize retrain models audit", '
-                            'error="invalid_token", error_description="Provide a tenant-scoped SwiftForecast API key."'
-                        )
-                    },
-                )
+                response = Response("Unauthorized", status_code=401)
                 await response(scope, receive, send)
                 return
         await self.app(scope, receive, send)
@@ -162,7 +127,6 @@ def create_app() -> Starlette:
         lifespan=lifespan,
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
-            Route("/.well-known/oauth-protected-resource", protected_resource_metadata, methods=["GET"]),
             Route("/api/real-sequence", rest_real_sequence, methods=["POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ]
