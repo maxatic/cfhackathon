@@ -12,6 +12,12 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-18 15:46
+shipped: Mobile 390px viewport check passed, page overflow fixed
+working: Vercel preview deployment
+next: Open PR from lane-b-dashboard when preview URL is ready
+asks: Vercel auth or project link if preview deploy is not already configured
+
 ### 2026-05-18 15:42
 shipped: Browser smoke test passed, stale MCP service fallback hardened
 working: Mobile responsive check and Vercel preview

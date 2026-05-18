@@ -52,6 +52,7 @@ button:disabled {
 .side {
   border-right: 1px solid var(--line);
   background: #141611;
+  min-width: 0;
   padding: 24px;
 }
 
@@ -113,6 +114,7 @@ button:disabled {
 
 .control select,
 .control input {
+  min-width: 0;
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -183,6 +185,7 @@ button:disabled {
   padding: 24px;
   display: grid;
   gap: 20px;
+  min-width: 0;
 }
 
 .topbar {
@@ -232,6 +235,7 @@ button:disabled {
   border-radius: 8px;
   background: var(--panel);
   box-shadow: 0 12px 30px var(--shadow);
+  min-width: 0;
 }
 
 .metric {
@@ -634,9 +638,12 @@ button:disabled {
   border-radius: 8px;
   background: rgba(184, 226, 59, 0.08);
   color: var(--green);
+  max-width: 100%;
   padding: 6px 8px;
   font-size: 12px;
   overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .scenario-grid {
@@ -898,11 +905,22 @@ th {
 
   .metrics,
   .grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .topbar {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .topbar > *,
+  .metrics > *,
+  .grid > * {
+    min-width: 0;
+  }
+
+  .status {
+    white-space: normal;
   }
 
   .panel-header,
