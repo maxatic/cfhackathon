@@ -85,7 +85,9 @@ async function postMcpService<T>(path: string, input: Record<string, unknown>, f
   });
 
   if (!response.ok) {
-    throw new Error(`MCP service returned ${response.status}`);
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    const detail = payload.error ? `: ${payload.error}` : "";
+    throw new Error(`MCP service returned ${response.status}${detail}`);
   }
 
   return (await response.json()) as T;

@@ -20,7 +20,6 @@ import {
   createLocalAuditEvents,
   createLocalForecast,
   createLocalModelVersions,
-  createLocalRealSequence,
   createLocalRisk,
   products,
   segments,
@@ -388,43 +387,48 @@ export function Dashboard() {
 
   function renderActionPanel() {
     if (activePanel === "realModel") {
-      const sequence = realSequence ?? createLocalRealSequence();
       return (
         <div className="action-stack">
           <button className="secondary-button" onClick={runRealModel} disabled={loadingAction === "realModel"}>
             {loadingAction === "realModel" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}
             Run CTO model
           </button>
-          <div className="audit-grid real-model-grid">
-            <div>
-              <span>Client</span>
-              <strong>{sequence.client_id}</strong>
-            </div>
-            <div>
-              <span>Temperature</span>
-              <strong>{sequence.temperature}</strong>
-            </div>
-            <div>
-              <span>Top K</span>
-              <strong>{sequence.top_k}</strong>
-            </div>
-            <div>
-              <span>Generated tokens</span>
-              <strong>{sequence.tokens.length}</strong>
-            </div>
-          </div>
-          <div className="sequence-block">
-            <h4>Start sequence</h4>
-            <p>{sequence.start_sequence}</p>
-          </div>
-          <div className="sequence-block is-generated">
-            <h4>Generated sequence</h4>
-            <div className="token-list">
-              {sequence.tokens.map((token, index) => (
-                <span key={`${token}-${index}`}>{token}</span>
-              ))}
-            </div>
-          </div>
+          {realSequence ? (
+            <>
+              <div className="audit-grid real-model-grid">
+                <div>
+                  <span>Client</span>
+                  <strong>{realSequence.client_id}</strong>
+                </div>
+                <div>
+                  <span>Temperature</span>
+                  <strong>{realSequence.temperature}</strong>
+                </div>
+                <div>
+                  <span>Top K</span>
+                  <strong>{realSequence.top_k}</strong>
+                </div>
+                <div>
+                  <span>Generated tokens</span>
+                  <strong>{realSequence.tokens.length}</strong>
+                </div>
+              </div>
+              <div className="sequence-block">
+                <h4>Start sequence</h4>
+                <p>{realSequence.start_sequence}</p>
+              </div>
+              <div className="sequence-block is-generated">
+                <h4>Generated sequence</h4>
+                <div className="token-list">
+                  {realSequence.tokens.map((token, index) => (
+                    <span key={`${token}-${index}`}>{token}</span>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">Run the CTO model to call the mounted ONNX artifact bundle.</div>
+          )}
           <p className="panel-copy">
             This panel calls the mounted NDA bundle through the MCP service REST bridge. If it returns a service
             error, restart the Docker container with REAL_MODEL_ARTIFACT_DIR pointing at the CTO folder.
