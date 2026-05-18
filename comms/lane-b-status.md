@@ -12,4 +12,8 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
-(empty — first update Monday 10:00)
+### 2026-05-18 15:29
+shipped: NexusLab-only dashboard reset, old Northstar/Apex/SKU/retraining/risk routes removed
+working: Locked MCP tool panels and REST mirror routes
+next: Split out scenario, personalization, privacy, and audit polish into smaller commits
+asks: Lane A to keep `/api/predict`, `/api/scenarios`, `/api/forecast-plan`, `/api/personalize`, `/api/anonymize`, `/api/audit`, `/api/clients`

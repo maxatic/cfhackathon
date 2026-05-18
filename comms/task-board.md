@@ -46,15 +46,15 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 ## Lane B — Dashboard (Maxat, Codex CLI)
 
 ### Monday May 18
-- [ ] Strip Northstar references from demo-data.ts
-- [ ] Strip NSI-VAL-100, tenant_northstar, tenant_apex everywhere
-- [ ] Hardcode demo client picker to nexus_lab_solutions
-- [ ] Confirm dashboard still loads with no console errors
+- [X] Strip Northstar references from demo-data.ts
+- [X] Strip NSI-VAL-100, tenant_northstar, tenant_apex everywhere
+- [X] Hardcode demo client picker to nexus_lab_solutions
+- [X] Confirm dashboard still loads with no console errors
 
 ### Tuesday May 19
 - [ ] Basket sequence display panel (groups tokens by time delta)
 - [ ] Scenario comparison panel (3+ beams side by side)
-- [ ] Wire new MCP tools through REST mirror routes in apps/web/src/app/api/
+- [~] Wire new MCP tools through REST mirror routes in apps/web/src/app/api/
 
 ### Wednesday May 20
 - [ ] Sensor swap panel (before/after with visual diff)
