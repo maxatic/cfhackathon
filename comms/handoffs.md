@@ -148,4 +148,16 @@ status: pending
 
 ## Active handoffs
 
-(none yet — fill in as work happens)
+- [A to B] [15:00 2026-05-18]
+  context: Lane A's Monday string-strip pass deliberately did not touch any file under `apps/web/` per lane ownership in AGENTS.md. Lane B owns dashboard cleanup.
+  asks: Strip Northstar/Apex/NSI-VAL-100/mini-transformer references and hardcode `nexus_lab_solutions` where a single-tenant value is needed.
+  contract: After the strip, `grep -rIn -e tenant_northstar -e tenant_apex -e Northstar -e Apex -e NSI-VAL-100 -e mini-transformer apps/web/` returns no hits.
+  example: file `apps/web/src/lib/demo-data.ts` currently has hits on lines 14, 15, 19, 84, 227, 280, 285, 333. Replace tenant id with `nexus_lab_solutions`, drop the synthetic SKU rows, and replace `mini-transformer-v1` model_version strings with `swiftron-onnx-v1`.
+  status: pending
+
+- [A to C] [15:00 2026-05-18]
+  context: Lane A's Monday string-strip pass deliberately did not touch `docs/demo-script.md` or any file under `services/mcp/tests/` per lane ownership in AGENTS.md. Lane A also deleted `services/mcp/erp_forecast/model.py`, `data.py`, and `jobs.py`, which `services/mcp/tests/test_core.py` still imports.
+  asks: (1) Strip Northstar/Apex/NSI-VAL-100 references from `docs/demo-script.md` and rewrite the demo around `nexus_lab_solutions`. (2) Delete or rewrite `services/mcp/tests/test_core.py`; its imports `from erp_forecast.model import MiniTransformerForecaster` and the `tenant_northstar` test fixtures are dead.
+  contract: After the strip, `grep -rIn -e tenant_northstar -e tenant_apex -e Northstar -e Apex -e NSI-VAL-100 -e mini-transformer -e MiniTransformer docs/ services/mcp/tests/` returns no hits, and `python3 -m unittest discover services/mcp/tests` either passes or has no tests left to run.
+  example: in `docs/demo-script.md`, the opening line "Open the dashboard on `NSI-VAL-100`, segment `all`, 12 weeks" should become a single-client narrative against `nexus_lab_solutions` and the new locked tool surface (`predict_next_basket`, `predict_scenarios`, etc.).
+  status: pending

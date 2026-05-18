@@ -64,14 +64,12 @@ http://localhost:8000/mcp
 Seeded tenant-scoped API key:
 
 ```text
-sk_northstar_forecast_full
+sk_nexus_lab_forecast_full
 ```
 
-Legacy `demo_northstar_full` still works as a local alias, but the demo story should use the `sk_...` keys because they model B2B customer API keys with tenant and scope bindings. Seeded keys:
+Local alias `demo_nexus_lab_full` resolves to the same key. Seeded keys:
 
-- `sk_northstar_forecast_full`: tenant `tenant_northstar`, scopes `forecast`, `anonymize`, `retrain`, `models`, `audit`
-- `sk_northstar_forecast_read`: tenant `tenant_northstar`, scopes `forecast`, `models`, `audit`
-- `sk_apex_forecast_full`: tenant `tenant_apex`, scopes `forecast`, `anonymize`, `retrain`, `models`, `audit`
+- `sk_nexus_lab_forecast_full`: tenant `nexus_lab_solutions`, scopes `forecast`, `anonymize`, `models`, `audit`
 
 Core tools:
 
@@ -101,11 +99,10 @@ Primary challenge demo tool:
 
 ```json
 {
-  "tenant_id": "tenant_northstar",
-  "sku": "NSI-VAL-100",
+  "tenant_id": "nexus_lab_solutions",
   "objective": "I visit this customer next week. What three products should I prepare for?",
   "recommendation_count": 3,
-  "api_token": "sk_northstar_forecast_full"
+  "api_token": "sk_nexus_lab_forecast_full"
 }
 ```
 
@@ -120,7 +117,7 @@ Optional real-model call after mounting the NDA bundle:
   "temperature": 1.0,
   "top_k": 30,
   "seed": 0,
-  "api_token": "sk_northstar_forecast_full"
+  "api_token": "sk_nexus_lab_forecast_full"
 }
 ```
 
