@@ -12,4 +12,8 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
-(empty — first update Monday 10:00)
+### 2026-05-18 15:00
+shipped: branch lane-a-server with 8 commits — deleted model.py/data.py/jobs.py, extracted audit.py, stripped Northstar/Apex/NSI-VAL-100/mini-transformer from Lane A + shared files, dropped OAuth PRM + WWW-Authenticate, gutted orphaned server.py tools/resources/routes, updated .env.example with REAL_MODEL_ARTIFACT_DIR, symlinked CLAUDE.md → AGENTS.md.
+working: server.py is back to a minimal importable shell (erp_real_sequence_forecast + demand_planning_review + healthz + /api/real-sequence + BearerAuth middleware) ready for the locked tool surface rebuild starting Tuesday.
+next: Tuesday morning draft tool_schemas.py with all 6 locked tool signatures, then wire predict_next_basket and predict_scenarios behind Lane C's `predict_basket` and `run_beam` from handoffs 1 + 2.
+asks: Maxat — please strip Northstar/Apex/NSI-VAL-100/mini-transformer from apps/web/src/lib/demo-data.ts (handoff A→B posted, your demo-data.ts has 8 hits). Sherniyaz — please clean docs/demo-script.md and delete or rewrite services/mcp/tests/test_core.py which still imports the deleted MiniTransformerForecaster (handoff A→C posted). Not merging to main; rebase off main when we sync.
