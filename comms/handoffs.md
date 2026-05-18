@@ -47,7 +47,7 @@ def predict_basket(
 example: 
   input: `predict_basket("nexus_lab_solutions", None, max_generate=8, top_k=5, temperature=1.0, seed=42)`
   output: `{"client_id": "nexus_lab_solutions", "start_sequence": [], "generated_tokens": ["dt_3d", "c_acid_7", "c_solv_12", ...], "generated_times": [3, 0, 0, ...], "model_version": "swiftron-onnx-v1", "decoder_config": {"strategy": "top_k", "k": 5}}`
-status: pending
+status: accepted
 
 ### Handoff 2: [C to A] Tuesday morning
 context: beam_search.py exposes ranked trajectory enumeration
@@ -77,7 +77,7 @@ def run_beam(
 example:
   input: `run_beam("nexus_lab_solutions", None, beam_width=3, horizon=8)`
   output: `[{"rank": 1, "joint_log_prob": -12.3, "tokens": [...], "time_deltas": [...]}, {"rank": 2, "joint_log_prob": -13.8, ...}, {"rank": 3, "joint_log_prob": -14.1, ...}]`
-status: pending
+status: accepted
 
 ### Handoff 3: [A to B] Tuesday afternoon
 context: REST mirror endpoints live at `/api/predict`, `/api/scenarios`, `/api/personalize`, `/api/anonymize`, `/api/audit`
@@ -110,7 +110,7 @@ def predict_with_session(
 example:
   step 1: `session_id = apply_sensor("nexus_lab_solutions", ["b_dna_kit_3", "b_pcr_master_mix"])`
   step 2: `predict_with_session(session_id, None, max_generate=8)` returns predictions shifted toward biology supplies
-status: pending
+status: accepted
 
 ### Handoff 5: [C to A] Wednesday afternoon
 context: tokenize_orders.py converts raw ERP CSV rows to Swiftron token sequences with PII scrubbed
@@ -142,7 +142,7 @@ example:
   input rows include `customer_name`, `ship_to_address`, `po_number`, plus product SKUs, quantities, dates
   audit_report shows which fields got hashed, scrubbed, bucketed
   tokenized list shows tokens mapped from product SKUs to Swiftron's vocab (with fallback for unknown SKUs)
-status: pending
+status: accepted
 
 ---
 
@@ -196,4 +196,11 @@ status: pending
   asks: (1) Strip Northstar/Apex/NSI-VAL-100 references from `docs/demo-script.md` and rewrite the demo around `nexus_lab_solutions`. (2) Delete or rewrite `services/mcp/tests/test_core.py`; its imports `from erp_forecast.model import MiniTransformerForecaster` and the `tenant_northstar` test fixtures are dead.
   contract: After the strip, `grep -rIn -e tenant_northstar -e tenant_apex -e Northstar -e Apex -e NSI-VAL-100 -e mini-transformer -e MiniTransformer docs/ services/mcp/tests/` returns no hits, and `python3 -m unittest discover services/mcp/tests` either passes or has no tests left to run.
   example: in `docs/demo-script.md`, the opening line "Open the dashboard on `NSI-VAL-100`, segment `all`, 12 weeks" should become a single-client narrative against `nexus_lab_solutions` and the new locked tool surface (`predict_next_basket`, `predict_scenarios`, etc.).
-  status: pending
+  status: done
+
+- [C to A] [16:12 2026-05-18]
+  context: Lane C implemented the Python functions Lane A needs for the locked MCP tools.
+  asks: Wire `predict_basket`, `run_beam`, `apply_sensor` plus `predict_with_session`, and `anonymize_and_tokenize` into the server tool layer.
+  contract: function signatures match the pre-planned handoffs above.
+  example: Lane A can import from `real_model.py`, `beam_search.py`, `sensor.py`, and `tokenize_orders.py`.
+  status: done

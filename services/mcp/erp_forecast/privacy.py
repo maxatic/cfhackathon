@@ -1,10 +1,10 @@
+"""PII scrubbing utilities for ERP order rows."""
+
 from __future__ import annotations
 
 import re
 from hashlib import sha256
 from typing import Any, Iterable, Mapping
-
-from .data import OrderRecord
 
 
 SENSITIVE_FIELD_HINTS = {
@@ -28,26 +28,31 @@ DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _hash_value(value: str, salt: str) -> str:
+    """Return a deterministic short hash for a sensitive field value."""
     digest = sha256(f"{salt}:{value}".encode("utf-8")).hexdigest()
     return digest[:12]
 
 
 def _normalize_key(key: str) -> str:
+    """Normalize field names for hint matching."""
     return key.strip().lower().replace("-", "_").replace(" ", "_")
 
 
 def _field_matches(key: str, hints: set[str]) -> bool:
+    """Return whether a field name matches any sensitive hint."""
     normalized = _normalize_key(key)
     return any(hint in normalized for hint in hints)
 
 
-def _row_to_mapping(row: OrderRecord | Mapping[str, Any]) -> dict[str, Any]:
-    if isinstance(row, OrderRecord):
+def _row_to_mapping(row: Mapping[str, Any] | Any) -> dict[str, Any]:
+    """Coerce mapping-like rows or dataclass-style rows into dictionaries."""
+    if hasattr(row, "to_dict"):
         return row.to_dict()
     return dict(row)
 
 
 def _detect_sensitive_fields(rows: list[dict[str, Any]]) -> list[str]:
+    """Detect fields that look like direct identifiers or contact details."""
     detected: set[str] = set()
     for row in rows:
         for key, value in row.items():
@@ -63,6 +68,7 @@ def _detect_sensitive_fields(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def _looks_like_phone(value: str) -> bool:
+    """Return whether text looks like a phone number and not a date."""
     stripped = value.strip()
     if DATE_PATTERN.match(stripped):
         return False
@@ -73,6 +79,7 @@ def _looks_like_phone(value: str) -> bool:
 
 
 def _customer_source(row: Mapping[str, Any]) -> str:
+    """Return the most stable customer identifier available for hashing."""
     for key in ("customer_id", "customer_name", "email", "contact_email", "account_id", "account_name"):
         if key in row and row[key] not in (None, ""):
             return str(row[key])
@@ -80,6 +87,7 @@ def _customer_source(row: Mapping[str, Any]) -> str:
 
 
 def _coerce_bool(value: Any) -> bool:
+    """Coerce common ERP boolean values."""
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -88,6 +96,7 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def _coerce_int(value: Any, default: int = 0) -> int:
+    """Coerce numeric ERP values to integers."""
     try:
         return int(round(float(value)))
     except (TypeError, ValueError):
@@ -95,6 +104,7 @@ def _coerce_int(value: Any, default: int = 0) -> int:
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
+    """Coerce numeric ERP values to floats."""
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -102,11 +112,16 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
 
 
 def anonymize_orders(
-    orders: Iterable[OrderRecord | Mapping[str, Any]],
+    orders: Iterable[Mapping[str, Any] | Any],
     salt: str = "swiftforecast-demo",
     sample_size: int = 50,
 ) -> dict[str, object]:
-    """Return anonymized ERP rows plus a deterministic privacy audit report."""
+    """Return anonymized ERP rows plus a deterministic privacy audit report.
+
+    Example:
+        `anonymize_orders([{"customer_name": "Acme", "sku": "SKU-1"}], sample_size=1)`
+        returns a sample row with `customer_ref` and no direct customer name.
+    """
     rows = [_row_to_mapping(order) for order in orders]
     if sample_size < 1 or sample_size > 500:
         raise ValueError("sample_size must be between 1 and 500.")
@@ -176,6 +191,7 @@ def anonymize_orders(
 
 
 def _k_anonymity_proxy(rows: list[dict[str, Any]]) -> int:
+    """Estimate anonymity by the smallest segment-region bucket."""
     buckets: dict[tuple[Any, Any], int] = {}
     for row in rows:
         key = (row.get("customer_segment"), row.get("region"))
@@ -184,6 +200,7 @@ def _k_anonymity_proxy(rows: list[dict[str, Any]]) -> int:
 
 
 def _price_bucket(price: float) -> str:
+    """Bucket unit prices so raw values are not exposed."""
     if price < 50:
         return "0-50"
     if price < 150:
