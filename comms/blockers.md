@@ -11,4 +11,5 @@ Rule: if you are stuck for more than 45 minutes, post here and ping the other la
 
 ---
 
-(empty)
+- [LANE-B] [15:50 2026-05-18] Vercel preview deploy is blocked: repo is not linked locally, no Vercel CLI is installed, and the connected Vercel project appears to target a different GitHub repo named `hackathon`
+  resolved-by: [LANE-B] [pending]

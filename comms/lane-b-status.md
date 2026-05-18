@@ -12,6 +12,12 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-18 15:50
+shipped: Vercel state checked, preview blocker recorded
+working: Waiting for correct Vercel project link or CLI auth
+next: Open PR from pushed lane-b-dashboard branch
+asks: Link `maxatic/cfhackathon` to Vercel or provide project settings
+
 ### 2026-05-18 15:46
 shipped: Mobile 390px viewport check passed, page overflow fixed
 working: Vercel preview deployment

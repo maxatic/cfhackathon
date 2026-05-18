@@ -59,7 +59,7 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 ### Wednesday May 20
 - [X] Sensor swap panel (before/after with visual diff)
 - [X] Anonymization audit panel (shows PII scrub + token mapping)
-- [ ] Vercel preview deployment URL working
+- [!] Vercel preview deployment URL working
 
 ### Thursday May 21
 - [ ] Vercel production deploy
