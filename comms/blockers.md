@@ -13,3 +13,5 @@ Rule: if you are stuck for more than 45 minutes, post here and ping the other la
 
 - [LANE-B] [15:50 2026-05-18] Vercel preview deploy is blocked: repo is not linked locally, no Vercel CLI is installed, and the connected Vercel project appears to target a different GitHub repo named `hackathon`
   resolved-by: [LANE-B] [pending]
+- [LANE-B] [16:02 2026-05-18] Preview URL https://cf-hackathon-dashboard.vercel.app/ is reachable but serves the old Northstar dashboard, not `lane-b-dashboard`
+  resolved-by: [LANE-B] [pending]

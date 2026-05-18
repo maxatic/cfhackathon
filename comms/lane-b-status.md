@@ -12,6 +12,12 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-18 16:02
+shipped: Preview URL checked, it serves old Northstar UI instead of Lane B branch
+working: Need Vercel redeploy from `lane-b-dashboard`
+next: Update Vercel branch/deployment settings, then re-check URL
+asks: Redeploy preview from `lane-b-dashboard`, not `main`
+
 ### 2026-05-18 15:50
 shipped: Vercel state checked, preview blocker recorded
 working: Waiting for correct Vercel project link or CLI auth
