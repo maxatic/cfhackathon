@@ -133,6 +133,11 @@ function ActionNotice({
 export function Dashboard() {
   const [clientId] = useState(demoClient.client_id);
   const [intent, setIntent] = useState(intentOptions[0]);
+  const [maxGenerate, setMaxGenerate] = useState(8);
+  const [topK, setTopK] = useState(5);
+  const [temperature, setTemperature] = useState(1);
+  const [beamWidth, setBeamWidth] = useState(3);
+  const [horizon, setHorizon] = useState(8);
   const [selectedSensorTokens, setSelectedSensorTokens] = useState<string[]>(sensorTokenOptions.slice(0, 2));
   const [prediction, setPrediction] = useState<BasketPrediction>(() => createLocalBasketPrediction());
   const [scenarios, setScenarios] = useState<ScenarioResponse>(() => createLocalScenarios());
@@ -172,9 +177,9 @@ export function Dashboard() {
     try {
       const result = await postJson<BasketPrediction>("/api/predict", {
         client_id: clientId,
-        max_generate: 8,
-        top_k: 5,
-        temperature: 1,
+        max_generate: maxGenerate,
+        top_k: topK,
+        temperature,
         seed: 42,
       });
       setPrediction(result);
@@ -196,9 +201,9 @@ export function Dashboard() {
     try {
       const result = await postJson<ScenarioResponse>("/api/scenarios", {
         client_id: clientId,
-        beam_width: 3,
-        horizon: 8,
-        temperature: 0.8,
+        beam_width: beamWidth,
+        horizon,
+        temperature,
       });
       setScenarios(result);
       setStatus(`${result.scenarios.length} scenarios ready`);
@@ -463,6 +468,69 @@ export function Dashboard() {
           </select>
         </div>
 
+        <div className="control-grid">
+          <div className="control">
+            <label htmlFor="max-generate">Tokens</label>
+            <input
+              id="max-generate"
+              type="number"
+              min="1"
+              max="80"
+              value={maxGenerate}
+              onChange={(event) => setMaxGenerate(Number(event.target.value))}
+            />
+          </div>
+          <div className="control">
+            <label htmlFor="top-k">Top K</label>
+            <input
+              id="top-k"
+              type="number"
+              min="1"
+              max="100"
+              value={topK}
+              onChange={(event) => setTopK(Number(event.target.value))}
+            />
+          </div>
+        </div>
+
+        <div className="control">
+          <label htmlFor="temperature">Temperature: {temperature.toFixed(1)}</label>
+          <input
+            id="temperature"
+            type="range"
+            min="0.1"
+            max="2"
+            step="0.1"
+            value={temperature}
+            onChange={(event) => setTemperature(Number(event.target.value))}
+          />
+        </div>
+
+        <div className="control-grid">
+          <div className="control">
+            <label htmlFor="beam-width">Beams</label>
+            <input
+              id="beam-width"
+              type="number"
+              min="1"
+              max="8"
+              value={beamWidth}
+              onChange={(event) => setBeamWidth(Number(event.target.value))}
+            />
+          </div>
+          <div className="control">
+            <label htmlFor="horizon">Horizon</label>
+            <input
+              id="horizon"
+              type="number"
+              min="1"
+              max="32"
+              value={horizon}
+              onChange={(event) => setHorizon(Number(event.target.value))}
+            />
+          </div>
+        </div>
+
         <button className="run-button" onClick={runPrediction} disabled={loadingAction === "predict"}>
           {loadingAction === "predict" ? <Loader2 className="spin" size={17} aria-hidden="true" /> : <Play size={17} aria-hidden="true" />}
           Predict basket
@@ -558,13 +626,37 @@ export function Dashboard() {
               <h3>Scenario comparison</h3>
               <span className="pill">
                 <Activity size={14} aria-hidden="true" />
-                predict_scenarios
+                {beamWidth} beams
               </span>
             </div>
             <div className="scenario-grid">
               {scenarios.scenarios.slice(0, 3).map((scenario) => (
                 <ScenarioCard key={scenario.rank} scenario={scenario} />
               ))}
+            </div>
+            <div className="table-wrap scenario-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Joint log-prob</th>
+                    <th>First token</th>
+                    <th>Time delta</th>
+                    <th>Token count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenarios.scenarios.map((scenario) => (
+                    <tr key={scenario.rank}>
+                      <td>{scenario.rank}</td>
+                      <td>{formatLogProb(scenario.joint_log_prob)}</td>
+                      <td>{scenario.tokens[0] ?? "none"}</td>
+                      <td>{formatDelta(scenario.time_deltas[0] ?? 0)}</td>
+                      <td>{scenario.tokens.length}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </section>

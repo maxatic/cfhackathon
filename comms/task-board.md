@@ -52,8 +52,8 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 - [X] Confirm dashboard still loads with no console errors
 
 ### Tuesday May 19
-- [ ] Basket sequence display panel (groups tokens by time delta)
-- [ ] Scenario comparison panel (3+ beams side by side)
+- [X] Basket sequence display panel (groups tokens by time delta)
+- [X] Scenario comparison panel (3+ beams side by side)
 - [~] Wire new MCP tools through REST mirror routes in apps/web/src/app/api/
 
 ### Wednesday May 20

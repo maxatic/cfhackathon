@@ -12,6 +12,12 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-18 15:32
+shipped: Basket sequence panel, beam comparison cards, decoder controls
+working: Sensor swap, privacy audit, audit event polish
+next: Finish remaining locked tool panels and browser smoke test
+asks: none
+
 ### 2026-05-18 15:29
 shipped: NexusLab-only dashboard reset, old Northstar/Apex/SKU/retraining/risk routes removed
 working: Locked MCP tool panels and REST mirror routes
