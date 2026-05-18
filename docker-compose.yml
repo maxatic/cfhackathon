@@ -1,0 +1,12 @@
+services:
+  mcp:
+    build:
+      context: ./services/mcp
+    environment:
+      PORT: 8000
+      MCP_ENDPOINT: http://localhost:8000/mcp
+      MCP_RESOURCE_METADATA_URL: http://localhost:8000/.well-known/oauth-protected-resource
+      MCP_TRUST_TRANSPORT_AUTH: "true"
+      CORS_ALLOW_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"

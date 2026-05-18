@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "id": "forecast-1",
+  "method": "tools/call",
+  "params": {
+    "name": "erp_forecast_orders",
+    "arguments": {
+      "tenant_id": "tenant_northstar",
+      "sku": "NSI-VAL-100",
+      "customer_segment": "all",
+      "horizon_weeks": 12,
+      "api_token": "demo_northstar_full"
+    }
+  }
+}

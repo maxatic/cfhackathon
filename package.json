@@ -1,0 +1,14 @@
+{
+  "name": "cf-hackathon-swiftforecast",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "lint:web": "npm --workspace apps/web run lint",
+    "test:mcp": "PYTHONPATH=services/mcp python3 -m unittest discover services/mcp/tests",
+    "docker:mcp": "docker compose up --build mcp"
+  }
+}

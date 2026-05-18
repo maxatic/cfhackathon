@@ -1,0 +1,15 @@
+project_id = "swiftforecast-hackathon"
+
+[api]
+enabled = true
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["https://*.vercel.app"]
+
+[db]
+major_version = 15
