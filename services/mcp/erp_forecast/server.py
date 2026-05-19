@@ -129,6 +129,100 @@ def predict_scenarios(
         return payload
 
 
+_BEAM_KEYWORDS = (
+    "scenario",
+    "scenarios",
+    "alternative",
+    "alternatives",
+    "compare",
+    "comparison",
+    "best case",
+    "worst case",
+    "what if",
+    "options",
+    "trajector",
+    "ranked",
+)
+
+
+def _pick_forecast_strategy(objective_text: str) -> tuple[str, str]:
+    """Pick decoder strategy from the agent's objective text.
+
+    Returns (strategy, rationale).
+    """
+    lowered = (objective_text or "").lower()
+    if any(keyword in lowered for keyword in _BEAM_KEYWORDS):
+        return "beam_search", (
+            "Objective mentions scenario comparison or ranked alternatives, so "
+            "the server ran beam search to expose joint log-probabilities."
+        )
+    return "top_k", (
+        "Objective reads as a single most-likely next basket, so the server "
+        "ran top-k autoregressive decoding."
+    )
+
+
+@mcp.tool()
+def forecast_plan(
+    client_id: str = DEMO_TENANT_ID,
+    objective_text: str = "",
+    horizon_hint: int | None = None,
+    api_token: str | None = None,
+) -> dict[str, Any]:
+    """Adaptive planner. Picks greedy or beam from `objective_text`, then calls it."""
+    with _AuditContext(
+        STORE,
+        "forecast_plan",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["forecast_plan"],
+        api_token,
+    ):
+        strategy, rationale = _pick_forecast_strategy(objective_text)
+        try:
+            real_model = _load_real_model()
+            model = real_model.get_default_model()
+            if strategy == "beam_search":
+                horizon = max(4, min(int(horizon_hint or 12), 32))
+                inner: dict[str, Any] = {
+                    "client_id": client_id,
+                    "scenarios": model.run_beam(
+                        client_id=client_id,
+                        start_sequence=None,
+                        beam_width=4,
+                        horizon=horizon,
+                        temperature=1.0,
+                    ),
+                    "decoder_config": {
+                        "strategy": "beam_search",
+                        "beam_width": 4,
+                        "horizon": horizon,
+                        "temperature": 1.0,
+                    },
+                }
+            else:
+                max_generate = max(4, min(int(horizon_hint or 16), 48))
+                inner = model.predict_basket(
+                    client_id=client_id,
+                    start_sequence=None,
+                    max_generate=max_generate,
+                    top_k=5,
+                    temperature=1.0,
+                    seed=None,
+                )
+        except Exception as exc:
+            raise ValueError(f"forecast_plan failed: {exc}") from exc
+
+        payload = {
+            "client_id": client_id,
+            "chosen_strategy": strategy,
+            "rationale": rationale,
+            "payload": inner,
+            "model_version": _model_version(),
+        }
+        STORE.record_latest_prediction("forecast_plan", payload)
+        return payload
+
+
 async def healthz(_request: Request) -> JSONResponse:
     """Plain liveness probe for Docker and Vercel."""
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
@@ -183,6 +277,21 @@ async def rest_scenarios(request: Request) -> JSONResponse:
         return _err(exc)
 
 
+async def rest_forecast_plan(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request)
+        return JSONResponse(
+            forecast_plan(
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                objective_text=str(body.get("objective_text", "")),
+                horizon_hint=body.get("horizon_hint"),
+                api_token=body.get("api_token"),
+            )
+        )
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
+
+
 class BearerAuthMiddleware:
     """Reject /mcp requests that fail bearer-token validation."""
 
@@ -215,6 +324,7 @@ def create_app() -> Starlette:
             Route("/healthz", healthz, methods=["GET"]),
             Route("/api/predict", rest_predict, methods=["POST"]),
             Route("/api/scenarios", rest_scenarios, methods=["POST"]),
+            Route("/api/forecast-plan", rest_forecast_plan, methods=["POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
     )
