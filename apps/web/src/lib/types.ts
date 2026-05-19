@@ -194,3 +194,91 @@ export type RealSequenceResponse = {
   top_k: number;
   seed: number;
 };
+
+// Locked MCP tool response shapes (Lane A server, May 19 onwards).
+// REST mirrors live at /api/predict, /api/scenarios, /api/forecast-plan,
+// /api/personalize, /api/anonymize, /api/audit, /api/clients.
+
+export type DecoderConfig = {
+  strategy: string;
+  top_k?: number;
+  temperature?: number;
+  max_generate?: number;
+  seed?: number;
+  beam_width?: number;
+  horizon?: number;
+};
+
+export type PredictNextBasketResponse = {
+  client_id: string;
+  start_sequence: string[];
+  generated_tokens: string[];
+  generated_times: number[];
+  model_version: string;
+  decoder_config: DecoderConfig;
+};
+
+export type ScenarioTrajectory = {
+  rank: number;
+  joint_log_prob: number;
+  tokens: string[];
+  time_deltas: number[];
+};
+
+export type PredictScenariosResponse = {
+  client_id: string;
+  scenarios: ScenarioTrajectory[];
+  model_version: string;
+  decoder_config: DecoderConfig;
+};
+
+export type ForecastPlanResponse = {
+  client_id: string;
+  chosen_strategy: "top_k" | "beam_search";
+  rationale: string;
+  payload: PredictNextBasketResponse | (PredictScenariosResponse & { scenarios: ScenarioTrajectory[] });
+  model_version: string;
+};
+
+export type PersonalizeClientResponse = {
+  session_id: string;
+  client_id: string;
+  additional_tokens: string[];
+  prediction: PredictNextBasketResponse;
+};
+
+export type AnonymizeAuditReport = {
+  row_count: number;
+  fields_hashed: string[];
+  fields_scrubbed: string[];
+  detected_sensitive_fields: string[];
+  k_anonymity_proxy: number;
+  privacy_notes: string[];
+};
+
+export type TokenizedRow = {
+  row_id: string;
+  source_label: string;
+  token: string;
+  time_delta: number;
+};
+
+export type AnonymizeAndTokenizeResponse = {
+  client_id: string;
+  tokenized: string[];
+  time_deltas: number[];
+  audit_report: AnonymizeAuditReport;
+  rows: TokenizedRow[];
+};
+
+export type ListClientsResponse = {
+  clients: string[];
+  count: number;
+  model_version: string;
+};
+
+export type ListAuditEventsResponse = {
+  tenant_id: string;
+  events: AuditEvent[];
+  count: number;
+};
