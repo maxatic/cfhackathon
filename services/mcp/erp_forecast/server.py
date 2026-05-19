@@ -292,6 +292,46 @@ def anonymize_and_tokenize_orders(
         return result
 
 
+@mcp.tool()
+def list_clients(api_token: str | None = None) -> dict[str, Any]:
+    """Return client ids visible to the mounted Swiftron bundle."""
+    with _AuditContext(
+        STORE,
+        "list_clients",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["list_clients"],
+        api_token,
+    ):
+        try:
+            real_model = _load_real_model()
+            clients = real_model.get_default_model().list_clients()
+        except Exception as exc:
+            raise ValueError(f"list_clients failed: {exc}") from exc
+        return {
+            "clients": clients,
+            "count": len(clients),
+            "model_version": _model_version(),
+        }
+
+
+@mcp.tool()
+def list_audit_events(limit: int = 100, api_token: str | None = None) -> dict[str, Any]:
+    """Return recent audit events recorded by tool calls on this server."""
+    with _AuditContext(
+        STORE,
+        "list_audit_events",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["list_audit_events"],
+        api_token,
+    ):
+        events = STORE.list_audit_events(limit=limit)
+        return {
+            "tenant_id": DEMO_TENANT_ID,
+            "events": events,
+            "count": len(events),
+        }
+
+
 async def healthz(_request: Request) -> JSONResponse:
     """Plain liveness probe for Docker and Vercel."""
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
@@ -397,6 +437,23 @@ async def rest_anonymize(request: Request) -> JSONResponse:
         return _err(exc)
 
 
+async def rest_clients(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request) if request.method == "POST" else {}
+        return JSONResponse(list_clients(api_token=body.get("api_token")))
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
+
+
+async def rest_audit(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request) if request.method == "POST" else {}
+        limit = int(body.get("limit", request.query_params.get("limit", 100)))
+        return JSONResponse(list_audit_events(limit=limit, api_token=body.get("api_token")))
+    except (ValueError, AuthorizationError) as exc:
+        return _err(exc)
+
+
 class BearerAuthMiddleware:
     """Reject /mcp requests that fail bearer-token validation."""
 
@@ -432,6 +489,8 @@ def create_app() -> Starlette:
             Route("/api/forecast-plan", rest_forecast_plan, methods=["POST"]),
             Route("/api/personalize", rest_personalize, methods=["POST"]),
             Route("/api/anonymize", rest_anonymize, methods=["POST"]),
+            Route("/api/clients", rest_clients, methods=["GET", "POST"]),
+            Route("/api/audit", rest_audit, methods=["GET", "POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
     )
