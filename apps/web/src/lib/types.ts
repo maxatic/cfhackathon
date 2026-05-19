@@ -15,6 +15,7 @@ export type DecoderConfig = {
   top_k?: number;
   temperature?: number;
   max_generate?: number;
+  seed?: number;
   beam_width?: number;
   horizon?: number;
 };
@@ -38,6 +39,7 @@ export type ScenarioTrajectory = {
 export type ScenarioResponse = {
   client_id: string;
   model_version: string;
+  decoder_config?: DecoderConfig;
   scenarios: ScenarioTrajectory[];
 };
 
@@ -87,8 +89,10 @@ export type AnonymizationResponse = {
 export type AuditEvent = {
   event_id: string;
   tool_name: string;
-  client_id: string;
+  tenant_id?: string;
+  client_id?: string;
   actor: string;
+  key_id?: string;
   status: "success" | "error" | string;
   latency_ms: number;
   timestamp: string;
@@ -97,4 +101,27 @@ export type AuditEvent = {
 
 export type AuditEventsResponse = {
   events: AuditEvent[];
+  count?: number;
+};
+
+export type PredictNextBasketResponse = BasketPrediction;
+export type PredictScenariosResponse = ScenarioResponse;
+export type PersonalizeClientResponse = {
+  session_id: string;
+  client_id: string;
+  additional_tokens: string[];
+  prediction: BasketPrediction;
+};
+export type AnonymizeAuditReport = AnonymizationAuditReport;
+export type TokenizedRow = TokenizedOrderRow;
+export type AnonymizeAndTokenizeResponse = AnonymizationResponse;
+export type ListClientsResponse = {
+  clients: string[];
+  count: number;
+  model_version: string;
+};
+export type ListAuditEventsResponse = {
+  tenant_id: string;
+  events: AuditEvent[];
+  count: number;
 };

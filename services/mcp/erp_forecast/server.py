@@ -1,7 +1,15 @@
+"""SwiftForecast MCP server: dual FastMCP + Starlette REST surface.
+
+Tools, resources, and prompts described in AGENTS.md are registered onto the
+`mcp` instance below. Each tool wraps a Lane C implementation
+(real_model, sensor, tokenize_orders) inside an `_AuditContext` so latency and
+identity land in the audit log.
+"""
+
 from __future__ import annotations
 
-import json
 from contextlib import asynccontextmanager
+from importlib import import_module
 from os import getenv
 from typing import Any
 
@@ -12,444 +20,526 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
 
+from .audit import _AuditContext
 from .auth import AuthorizationError, validate_bearer_token
-from .jobs import get_store
-from .real_model import RealSequenceModel
+from .store import STORE
+from .tool_schemas import DEMO_TENANT_ID, SCOPE_FOR_TOOL
 
-
-MCP_ENDPOINT = getenv("MCP_ENDPOINT", "http://localhost:8000/mcp")
-AUTH_SERVER = getenv("SUPABASE_AUTH_SERVER", "https://example.supabase.co/auth/v1")
-RESOURCE_METADATA_URL = getenv(
-    "MCP_RESOURCE_METADATA_URL",
-    "http://localhost:8000/.well-known/oauth-protected-resource",
-)
 
 mcp = FastMCP("SwiftForecast ERP", stateless_http=True, json_response=True)
-_REAL_MODEL: RealSequenceModel | None = None
 
 
-def get_real_model() -> RealSequenceModel:
-    global _REAL_MODEL
-    artifact_dir = getenv("REAL_MODEL_ARTIFACT_DIR")
-    if not artifact_dir:
-        raise ValueError(
-            "REAL_MODEL_ARTIFACT_DIR is not set. Mount the NDA bundle containing "
-            "landing_page_model.onnx, multi_client_dataset.joblib, alit_backend.py, "
-            "and pyarmor_runtime_000000."
-        )
-    if _REAL_MODEL is None:
-        _REAL_MODEL = RealSequenceModel(artifact_dir)
-    return _REAL_MODEL
+def _load_real_model() -> Any:
+    """Lazy-import Lane C's real_model so server boots without it."""
+    return import_module("erp_forecast.real_model")
+
+
+def _load_sensor() -> Any:
+    """Lazy-import Lane C's sensor module."""
+    return import_module("erp_forecast.sensor")
+
+
+def _load_tokenize_orders() -> Any:
+    """Lazy-import Lane C's tokenize_orders module."""
+    return import_module("erp_forecast.tokenize_orders")
+
+
+def _model_version() -> str:
+    """Pull MODEL_VERSION constant from real_model, or fall back to default."""
+    try:
+        return str(_load_real_model().MODEL_VERSION)
+    except Exception:
+        return "swiftron-onnx-v1"
 
 
 @mcp.tool()
-def erp_forecast_orders(
-    tenant_id: str,
-    sku: str,
-    customer_segment: str = "all",
-    horizon_weeks: int = 12,
+def predict_next_basket(
+    client_id: str = DEMO_TENANT_ID,
+    start_sequence: list[str] | None = None,
+    max_generate: int = 32,
+    top_k: int = 5,
+    temperature: float = 1.0,
+    seed: int | None = None,
     api_token: str | None = None,
 ) -> dict[str, Any]:
-    """Forecast future ERP order quantities for one tenant, SKU, and customer segment.
-
-    Use this when an agent needs a concise, structured demand forecast. The
-    optional api_token can be one of the demo tokens such as demo_northstar_full
-    for local or STDIO testing. HTTP deployments should send a bearer token too.
-    """
-    return get_store().forecast_orders(tenant_id, sku, customer_segment, horizon_weeks, api_token)
+    """Top-k autoregressive prediction. Returns ordered tokens with time deltas."""
+    with _AuditContext(
+        STORE,
+        "predict_next_basket",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["predict_next_basket"],
+        api_token,
+    ):
+        try:
+            real_model = _load_real_model()
+            result = real_model.get_default_model().predict_basket(
+                client_id=client_id,
+                start_sequence=start_sequence,
+                max_generate=max_generate,
+                top_k=top_k,
+                temperature=temperature,
+                seed=seed,
+            )
+        except Exception as exc:
+            raise ValueError(f"predict_next_basket failed: {exc}") from exc
+        STORE.record_latest_prediction("predict_next_basket", result)
+        return result
 
 
 @mcp.tool()
-def erp_beam_search_forecast(
-    tenant_id: str,
-    sku: str,
-    customer_segment: str = "all",
-    horizon_weeks: int = 12,
+def predict_scenarios(
+    client_id: str = DEMO_TENANT_ID,
+    start_sequence: list[str] | None = None,
     beam_width: int = 4,
+    horizon: int = 16,
     temperature: float = 1.0,
     api_token: str | None = None,
 ) -> dict[str, Any]:
-    """Generate ranked autoregressive forecast scenarios using beam search.
+    """Beam search over the decoder. Returns ranked trajectories with joint log-prob."""
+    with _AuditContext(
+        STORE,
+        "predict_scenarios",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["predict_scenarios"],
+        api_token,
+    ):
+        try:
+            real_model = _load_real_model()
+            scenarios = real_model.get_default_model().run_beam(
+                client_id=client_id,
+                start_sequence=start_sequence,
+                beam_width=beam_width,
+                horizon=horizon,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            raise ValueError(f"predict_scenarios failed: {exc}") from exc
+        payload = {
+            "client_id": client_id,
+            "scenarios": scenarios,
+            "model_version": _model_version(),
+            "decoder_config": {
+                "strategy": "beam_search",
+                "beam_width": beam_width,
+                "horizon": horizon,
+                "temperature": temperature,
+            },
+        }
+        STORE.record_latest_prediction("predict_scenarios", payload)
+        return payload
 
-    Use this after erp_forecast_orders when the agent needs alternative demand
-    paths, such as promotion lift, supply delay, or stockout drag scenarios.
-    Increase temperature to explore lower-probability alternatives; lower it for
-    conservative planning.
+
+_BEAM_KEYWORDS = (
+    "scenario",
+    "scenarios",
+    "alternative",
+    "alternatives",
+    "compare",
+    "comparison",
+    "best case",
+    "worst case",
+    "what if",
+    "options",
+    "trajector",
+    "ranked",
+)
+
+
+def _pick_forecast_strategy(objective_text: str) -> tuple[str, str]:
+    """Pick decoder strategy from the agent's objective text.
+
+    Returns (strategy, rationale).
     """
-    return get_store().beam_search_forecast(
-        tenant_id, sku, customer_segment, horizon_weeks, beam_width, temperature, api_token
+    lowered = (objective_text or "").lower()
+    if any(keyword in lowered for keyword in _BEAM_KEYWORDS):
+        return "beam_search", (
+            "Objective mentions scenario comparison or ranked alternatives, so "
+            "the server ran beam search to expose joint log-probabilities."
+        )
+    return "top_k", (
+        "Objective reads as a single most-likely next basket, so the server "
+        "ran top-k autoregressive decoding."
     )
 
 
 @mcp.tool()
-def erp_adaptive_forecast_plan(
-    tenant_id: str,
-    sku: str,
-    objective: str,
-    customer_segment: str = "all",
-    horizon_weeks: int | None = None,
-    strategy: str = "auto",
-    beam_width: int | None = None,
-    temperature: float | None = None,
-    recommendation_count: int = 3,
+def forecast_plan(
+    client_id: str = DEMO_TENANT_ID,
+    objective_text: str = "",
+    horizon_hint: int | None = None,
     api_token: str | None = None,
 ) -> dict[str, Any]:
-    """Let an agent choose the forecast workflow and decoding parameters.
-
-    Use this as the main CTO-challenge tool when the user describes a business
-    goal instead of a fixed API call, for example: "what should I prepare for a
-    customer visit next week?", "forecast inventory for the next 50 orders", or
-    "explore substitutes with more creative beam search." The tool selects
-    greedy or beam search, horizon, beam width, temperature, and optional product
-    recommendations while keeping the tenant/client fixed.
-    """
-    return get_store().adaptive_forecast_plan(
-        tenant_id,
-        sku,
-        objective,
-        customer_segment,
-        horizon_weeks,
-        strategy,
-        beam_width,
-        temperature,
-        recommendation_count,
+    """Adaptive planner. Picks greedy or beam from `objective_text`, then calls it."""
+    with _AuditContext(
+        STORE,
+        "forecast_plan",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["forecast_plan"],
         api_token,
-    )
+    ):
+        strategy, rationale = _pick_forecast_strategy(objective_text)
+        try:
+            real_model = _load_real_model()
+            model = real_model.get_default_model()
+            if strategy == "beam_search":
+                horizon = max(4, min(int(horizon_hint or 12), 32))
+                inner: dict[str, Any] = {
+                    "client_id": client_id,
+                    "scenarios": model.run_beam(
+                        client_id=client_id,
+                        start_sequence=None,
+                        beam_width=4,
+                        horizon=horizon,
+                        temperature=1.0,
+                    ),
+                    "decoder_config": {
+                        "strategy": "beam_search",
+                        "beam_width": 4,
+                        "horizon": horizon,
+                        "temperature": 1.0,
+                    },
+                }
+            else:
+                max_generate = max(4, min(int(horizon_hint or 16), 48))
+                inner = model.predict_basket(
+                    client_id=client_id,
+                    start_sequence=None,
+                    max_generate=max_generate,
+                    top_k=5,
+                    temperature=1.0,
+                    seed=None,
+                )
+        except Exception as exc:
+            raise ValueError(f"forecast_plan failed: {exc}") from exc
+
+        payload = {
+            "client_id": client_id,
+            "chosen_strategy": strategy,
+            "rationale": rationale,
+            "payload": inner,
+            "model_version": _model_version(),
+        }
+        STORE.record_latest_prediction("forecast_plan", payload)
+        return payload
 
 
 @mcp.tool()
-def erp_real_sequence_forecast(
-    client_id: str = "nexus_lab_solutions",
-    start_sequence: str | None = None,
-    max_generate: int = 30,
+def personalize_client(
+    client_id: str = DEMO_TENANT_ID,
+    additional_tokens: list[str] | None = None,
+    start_sequence: list[str] | None = None,
+    max_generate: int = 32,
+    top_k: int = 5,
     temperature: float = 1.0,
-    top_k: int = 30,
-    seed: int = 42,
+    seed: int | None = None,
     api_token: str | None = None,
 ) -> dict[str, Any]:
-    """Run the NDA-provided ONNX sequence model through its public adapter.
-
-    This tool is available when REAL_MODEL_ARTIFACT_DIR points at the CTO bundle.
-    It treats alit_backend as protected IP and only uses the public
-    SimulationDataset interface shown in the notebook.
-    """
-    if api_token:
-        validate_bearer_token(api_token)
-    return get_real_model().predict(
-        client_id=client_id,
-        start_sequence=start_sequence,
-        max_generate=max_generate,
-        temperature=temperature,
-        top_k=top_k,
-        seed=seed,
-    ).to_dict()
-
-
-@mcp.tool()
-def erp_rank_at_risk_customers(
-    tenant_id: str,
-    sku: str,
-    horizon_weeks: int = 12,
-    limit: int = 5,
-    api_token: str | None = None,
-) -> dict[str, Any]:
-    """Rank customers by downside order risk for one SKU.
-
-    Use this for CFO or demand-planning questions like "which customers are most
-    likely to reduce orders?" The tool compares each customer's recent run rate
-    with the lowest plausible beam-search scenario, then returns a ranked list
-    with demand exposure, revenue at risk, and recommended intervention.
-    """
-    return get_store().rank_at_risk_customers(tenant_id, sku, horizon_weeks, limit, api_token)
-
-
-@mcp.tool()
-def erp_anonymize_orders(
-    tenant_id: str,
-    sku: str | None = None,
-    customer_segment: str = "all",
-    sample_size: int = 50,
-    raw_order_rows: list[dict[str, Any]] | None = None,
-    api_token: str | None = None,
-) -> dict[str, Any]:
-    """Create an anonymized ERP order export sample and privacy report.
-
-    Use this before sharing seeded order history or raw uploaded ERP rows with
-    an external agent or analyst. The result hashes direct customer identifiers,
-    scrubs detected PII-like fields, buckets sensitive prices, and returns a
-    compact audit report.
-    """
-    return get_store().anonymize(
-        tenant_id,
-        sku,
-        customer_segment,
-        sample_size,
+    """Build a sensor session from `additional_tokens`, then predict with it."""
+    with _AuditContext(
+        STORE,
+        "personalize_client",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["personalize_client"],
         api_token,
-        raw_order_rows,
+    ):
+        if not additional_tokens:
+            raise ValueError("additional_tokens must include at least one token.")
+        try:
+            sensor = _load_sensor()
+            session_id = sensor.apply_sensor(client_id, list(additional_tokens))
+            prediction = sensor.predict_with_session(
+                session_id=session_id,
+                start_sequence=start_sequence,
+                max_generate=max_generate,
+                top_k=top_k,
+                temperature=temperature,
+                seed=seed,
+            )
+        except Exception as exc:
+            raise ValueError(f"personalize_client failed: {exc}") from exc
+        payload = {
+            "session_id": session_id,
+            "client_id": client_id,
+            "additional_tokens": list(additional_tokens),
+            "prediction": prediction,
+        }
+        STORE.record_latest_prediction("personalize_client", payload)
+        return payload
+
+
+@mcp.tool()
+def anonymize_and_tokenize_orders(
+    raw_rows: list[dict[str, Any]],
+    client_id: str = DEMO_TENANT_ID,
+    api_token: str | None = None,
+) -> dict[str, Any]:
+    """PII scrub raw ERP rows, then map them to the client's Swiftron vocabulary."""
+    with _AuditContext(
+        STORE,
+        "anonymize_and_tokenize_orders",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["anonymize_and_tokenize_orders"],
+        api_token,
+    ):
+        try:
+            tokenize_orders = _load_tokenize_orders()
+            result = tokenize_orders.anonymize_and_tokenize(
+                raw_rows=raw_rows,
+                client_id=client_id,
+            )
+        except Exception as exc:
+            raise ValueError(f"anonymize_and_tokenize_orders failed: {exc}") from exc
+        return result
+
+
+@mcp.tool()
+def list_clients(api_token: str | None = None) -> dict[str, Any]:
+    """Return client ids visible to the mounted Swiftron bundle."""
+    with _AuditContext(
+        STORE,
+        "list_clients",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["list_clients"],
+        api_token,
+    ):
+        try:
+            real_model = _load_real_model()
+            clients = real_model.get_default_model().list_clients()
+        except Exception as exc:
+            raise ValueError(f"list_clients failed: {exc}") from exc
+        return {
+            "clients": clients,
+            "count": len(clients),
+            "model_version": _model_version(),
+        }
+
+
+@mcp.tool()
+def list_audit_events(limit: int = 100, api_token: str | None = None) -> dict[str, Any]:
+    """Return recent audit events recorded by tool calls on this server."""
+    with _AuditContext(
+        STORE,
+        "list_audit_events",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["list_audit_events"],
+        api_token,
+    ):
+        events = STORE.list_audit_events(limit=limit)
+        return {
+            "tenant_id": DEMO_TENANT_ID,
+            "events": events,
+            "count": len(events),
+        }
+
+
+@mcp.resource("swift://model-card")
+def model_card_resource() -> str:
+    """Honest one-pager for the Swiftron ONNX model. No marketing language."""
+    return (
+        "Swiftron landing_page_model.onnx (model_version: swiftron-onnx-v1).\n"
+        "\n"
+        "Architecture: transformer with a sensor mechanism that conditions the\n"
+        "decoder on a fixed-size profile of vocabulary vectors. Inputs are a\n"
+        "padded sentence sequence, a catalog tensor, and the sensor block.\n"
+        "Outputs include a per-step time-token distribution, a product query\n"
+        "embedding, and a learned candidate transform.\n"
+        "\n"
+        "Decoding strategies exposed: top-k autoregressive sampling with\n"
+        "product uniqueness, and beam search over the same decoder with joint\n"
+        "log-probability ranking. The model's weights and dataset come from\n"
+        "Swiftron under NDA and are not modified by this server.\n"
+        "\n"
+        "Inputs accepted by the wrapper: client_id, optional start_sequence\n"
+        "(token list), decoder controls (max_generate, top_k, temperature,\n"
+        "beam_width, horizon), optional sensor tokens for personalization.\n"
     )
 
 
-@mcp.tool()
-def erp_trigger_retraining(
-    tenant_id: str,
-    reason: str = "manual demo trigger",
-    api_token: str | None = None,
-) -> dict[str, Any]:
-    """Queue a retraining job for the tenant.
-
-    The first response is queued, then erp_get_retraining_status advances the
-    deterministic demo job through running to completed. Completion activates a
-    tenant adapter model version and shifts future forecasts for the tenant.
-    """
-    return get_store().trigger_retraining(tenant_id, reason, api_token)
-
-
-@mcp.tool()
-def erp_get_retraining_status(
-    tenant_id: str,
-    job_id: str,
-    api_token: str | None = None,
-) -> dict[str, Any]:
-    """Poll retraining status, loss curve, before/after metrics, and model version."""
-    return get_store().get_retraining_status(tenant_id, job_id, api_token)
-
-
-@mcp.tool()
-def erp_list_model_versions(
-    tenant_id: str,
-    api_token: str | None = None,
-) -> dict[str, Any]:
-    """List active and archived model versions for a tenant."""
-    return get_store().list_model_versions(tenant_id, api_token)
-
-
-@mcp.tool()
-def erp_list_audit_events(
-    tenant_id: str,
-    limit: int = 20,
-    api_token: str | None = None,
-) -> dict[str, Any]:
-    """List recent tenant-scoped MCP tool audit events."""
-    return get_store().list_audit_events(tenant_id, limit, api_token)
-
-
-@mcp.resource("erp://dataset-card")
-def dataset_card() -> str:
-    """Describe the synthetic ERP dataset available to agents."""
-    return json.dumps(get_store().summary(), indent=2)
-
-
-@mcp.resource("erp://model-card")
-def model_card() -> str:
-    """Describe the forecasting model and decoding behavior."""
-    return json.dumps(
-        {
-            "model": "MiniTransformerForecaster",
-            "version": get_store().forecaster.version,
-            "architecture": "causal self-attention over weekly demand tokens with autoregressive decoding",
-            "decoders": ["greedy autoregressive", "temperature-controlled beam search", "adaptive MCP forecast planner"],
-            "intended_use": "B2B ERP order prediction demo for agent-compatible MCP workflows",
-            "limitations": [
-                "Synthetic data only",
-                "Forecasts are calibrated for demo plausibility, not production procurement decisions",
-                "No real customer PII should be passed to this demo service",
-            ],
-        },
-        indent=2,
+@mcp.resource("swift://dataset-card")
+def dataset_card_resource() -> str:
+    """Honest one-pager for multi_client_dataset.joblib."""
+    return (
+        "Swiftron multi_client_dataset.joblib: 169 anonymized client datasets,\n"
+        "each loaded through the protected SimulationDataset class.\n"
+        "\n"
+        "Each dataset exposes word_to_int and vocab arrays plus a master_w2v\n"
+        "object with a time_order list. Vocabulary mixes product tokens with\n"
+        "time-delta tokens prefixed `<dt_*>` (for example day, week, month,\n"
+        "year buckets) and a small set of control tokens such as `<eos>` and\n"
+        "`<unk>`. Product tokens use anonymized prefixes that group items by\n"
+        "category; the actual product names are not in the public surface.\n"
+        "\n"
+        "Sentence samples per client drive both the start-sequence fallback\n"
+        "and the sensor profile. The dataset is read-only at runtime.\n"
     )
 
 
-@mcp.resource("erp://forecast/latest")
-def latest_forecast() -> str:
-    """Return the latest forecast run created during this service session."""
-    return json.dumps(get_store().latest_forecast(), indent=2)
+@mcp.resource("swift://prediction/latest")
+def latest_prediction_resource() -> str:
+    """Most recent prediction tool payload, JSON-encoded."""
+    import json
+
+    snapshot = STORE.get_latest_prediction()
+    if snapshot is None:
+        return json.dumps({"status": "empty", "note": "no predictions yet"})
+    return json.dumps(snapshot, default=str)
 
 
 @mcp.prompt()
-def demand_planning_review(tenant_id: str, sku: str, customer_segment: str = "all") -> str:
-    """Guide an agent through demand planning review with forecast and scenario tools."""
+def procurement_planning_review(
+    client_id: str = DEMO_TENANT_ID,
+    focus: str = "next basket and one alternative",
+) -> str:
+    """Guide an agent through a procurement planning review for one client."""
     return (
-        f"Review demand risk for tenant {tenant_id}, SKU {sku}, segment {customer_segment}. "
-        "Start with erp_adaptive_forecast_plan and describe the business objective so "
-        "the MCP server can choose greedy decoding, beam search, temperature, and horizon. "
-        "If the user asks for fixed scenarios, call erp_beam_search_forecast with explicit "
-        "beam_width and temperature. Compare the base path with alternatives, identify "
-        "weeks with the widest uncertainty, and recommend procurement or customer-success "
-        "actions. If sharing history externally, call erp_anonymize_orders before quoting "
-        "row-level examples."
+        f"You are reviewing procurement plans for client {client_id}. Focus: {focus}.\n"
+        "\n"
+        "Step 1. Read resource swift://model-card to confirm which model and decoder\n"
+        "strategies are available.\n"
+        "\n"
+        "Step 2. Call predict_scenarios with beam_width=4 and a horizon between 12 and\n"
+        "20. Compare the ranked trajectories. Note where joint log-prob clusters and\n"
+        "where it spreads, since spread is the buying signal.\n"
+        "\n"
+        "Step 3. If the user mentions a change in the client's workload (a new project,\n"
+        "a different reagent, a swapped instrument), call personalize_client with the\n"
+        "matching additional_tokens and predict again. Diff the personalized basket\n"
+        "against the baseline.\n"
+        "\n"
+        "Step 4. If the user uploads an order CSV, call anonymize_and_tokenize_orders\n"
+        "with the parsed rows. Quote only the audit_report counts and the tokenized\n"
+        "list in the answer; never quote raw rows.\n"
+        "\n"
+        "Step 5. Recommend a short basket and call out the weeks with the widest\n"
+        "uncertainty. Keep the language for procurement managers, not engineers."
     )
 
 
 async def healthz(_request: Request) -> JSONResponse:
-    summary = get_store().summary()
-    return JSONResponse(
-        {
-            "ok": True,
-            "service": "swiftforecast-erp-mcp",
-            "dataset": {
-                "orders": summary["order_count"],
-                "products": summary["product_count"],
-                "customers": summary["customer_count"],
-            },
-        }
-    )
+    """Plain liveness probe for Docker and Vercel."""
+    return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
 
 
-async def protected_resource_metadata(_request: Request) -> JSONResponse:
-    return JSONResponse(
-        {
-            "resource": MCP_ENDPOINT,
-            "authorization_servers": [AUTH_SERVER] if AUTH_SERVER != "api-key-demo" else [],
-            "scopes_supported": ["forecast", "anonymize", "retrain", "models", "audit"],
-            "bearer_methods_supported": ["header"],
-            "api_key_supported": True,
-            "api_key_header": "Authorization: Bearer <tenant-scoped-api-key>",
-            "authorization_notes": (
-                "This hackathon demo validates static tenant-scoped API keys. "
-                "Supabase OAuth/JWKS validation is a planned production extension."
-            ),
-            "resource_documentation": "https://github.com/modelcontextprotocol/specification",
-        }
-    )
+def _err(exc: Exception, status: int = 400) -> JSONResponse:
+    return JSONResponse({"error": str(exc)}, status_code=status)
 
 
-async def rest_forecast(request: Request) -> JSONResponse:
-    body = await request.json()
+async def _read_body(request: Request) -> dict[str, Any]:
     try:
-        result = get_store().forecast_orders(
-            tenant_id=body["tenant_id"],
-            sku=body["sku"],
-            customer_segment=body.get("customer_segment", "all"),
-            horizon_weeks=int(body.get("horizon_weeks", 12)),
-            api_token=body.get("api_token"),
+        body = await request.json()
+    except ValueError as exc:
+        raise ValueError(f"Invalid JSON body: {exc}") from exc
+    if not isinstance(body, dict):
+        raise ValueError("Request body must be a JSON object.")
+    return body
+
+
+async def rest_predict(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request)
+        return JSONResponse(
+            predict_next_basket(
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                start_sequence=body.get("start_sequence"),
+                max_generate=int(body.get("max_generate", 32)),
+                top_k=int(body.get("top_k", 5)),
+                temperature=float(body.get("temperature", 1.0)),
+                seed=body.get("seed"),
+                api_token=body.get("api_token"),
+            )
         )
-    except (KeyError, ValueError, AuthorizationError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
 
 
-async def rest_real_sequence(request: Request) -> JSONResponse:
-    body = await request.json()
+async def rest_scenarios(request: Request) -> JSONResponse:
     try:
-        api_token = body.get("api_token")
-        if api_token:
-            validate_bearer_token(api_token)
-        result = get_real_model().predict(
-            client_id=body.get("client_id", "nexus_lab_solutions"),
-            start_sequence=body.get("start_sequence"),
-            max_generate=int(body.get("max_generate", 30)),
-            temperature=float(body.get("temperature", 1.0)),
-            top_k=int(body.get("top_k", 30)),
-            seed=int(body.get("seed", 42)),
-        ).to_dict()
-    except (KeyError, ValueError, ImportError, RuntimeError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
-
-
-async def rest_adaptive_forecast(request: Request) -> JSONResponse:
-    body = await request.json()
-    try:
-        result = get_store().adaptive_forecast_plan(
-            tenant_id=body["tenant_id"],
-            sku=body["sku"],
-            objective=body["objective"],
-            customer_segment=body.get("customer_segment", "all"),
-            horizon_weeks=body.get("horizon_weeks"),
-            strategy=body.get("strategy", "auto"),
-            beam_width=body.get("beam_width"),
-            temperature=body.get("temperature"),
-            recommendation_count=int(body.get("recommendation_count", 3)),
-            api_token=body.get("api_token"),
+        body = await _read_body(request)
+        return JSONResponse(
+            predict_scenarios(
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                start_sequence=body.get("start_sequence"),
+                beam_width=int(body.get("beam_width", 4)),
+                horizon=int(body.get("horizon", 16)),
+                temperature=float(body.get("temperature", 1.0)),
+                api_token=body.get("api_token"),
+            )
         )
-    except (KeyError, ValueError, AuthorizationError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
 
 
-async def rest_rank_at_risk(request: Request) -> JSONResponse:
-    body = await request.json()
+async def rest_forecast_plan(request: Request) -> JSONResponse:
     try:
-        result = get_store().rank_at_risk_customers(
-            tenant_id=body["tenant_id"],
-            sku=body["sku"],
-            horizon_weeks=int(body.get("horizon_weeks", 12)),
-            limit=int(body.get("limit", 5)),
-            api_token=body.get("api_token"),
+        body = await _read_body(request)
+        return JSONResponse(
+            forecast_plan(
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                objective_text=str(body.get("objective_text", "")),
+                horizon_hint=body.get("horizon_hint"),
+                api_token=body.get("api_token"),
+            )
         )
-    except (KeyError, ValueError, AuthorizationError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
+
+
+async def rest_personalize(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request)
+        return JSONResponse(
+            personalize_client(
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                additional_tokens=body.get("additional_tokens"),
+                start_sequence=body.get("start_sequence"),
+                max_generate=int(body.get("max_generate", 32)),
+                top_k=int(body.get("top_k", 5)),
+                temperature=float(body.get("temperature", 1.0)),
+                seed=body.get("seed"),
+                api_token=body.get("api_token"),
+            )
+        )
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
 
 
 async def rest_anonymize(request: Request) -> JSONResponse:
-    body = await request.json()
     try:
-        result = get_store().anonymize(
-            tenant_id=body["tenant_id"],
-            sku=body.get("sku"),
-            customer_segment=body.get("customer_segment", "all"),
-            sample_size=int(body.get("sample_size", 50)),
-            api_token=body.get("api_token"),
-            raw_order_rows=body.get("raw_order_rows"),
+        body = await _read_body(request)
+        raw_rows = body.get("raw_rows")
+        if not isinstance(raw_rows, list):
+            raise ValueError("raw_rows must be a JSON array of objects.")
+        return JSONResponse(
+            anonymize_and_tokenize_orders(
+                raw_rows=raw_rows,
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                api_token=body.get("api_token"),
+            )
         )
-    except (KeyError, ValueError, AuthorizationError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
 
 
-async def rest_trigger_retraining(request: Request) -> JSONResponse:
-    body = await request.json()
+async def rest_clients(request: Request) -> JSONResponse:
     try:
-        result = get_store().trigger_retraining(
-            tenant_id=body["tenant_id"],
-            reason=body.get("reason", "dashboard retraining trigger"),
-            api_token=body.get("api_token"),
-        )
-    except (KeyError, ValueError, AuthorizationError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
+        body = await _read_body(request) if request.method == "POST" else {}
+        return JSONResponse(list_clients(api_token=body.get("api_token")))
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
 
 
-async def rest_retraining_status(request: Request) -> JSONResponse:
-    body = await request.json()
+async def rest_audit(request: Request) -> JSONResponse:
     try:
-        result = get_store().get_retraining_status(
-            tenant_id=body["tenant_id"],
-            job_id=body["job_id"],
-            api_token=body.get("api_token"),
-        )
-    except (KeyError, ValueError, AuthorizationError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
-
-
-async def rest_model_versions(request: Request) -> JSONResponse:
-    body = await request.json()
-    try:
-        result = get_store().list_model_versions(
-            tenant_id=body["tenant_id"],
-            api_token=body.get("api_token"),
-        )
-    except (KeyError, ValueError, AuthorizationError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
-
-
-async def rest_audit_events(request: Request) -> JSONResponse:
-    body = await request.json()
-    try:
-        result = get_store().list_audit_events(
-            tenant_id=body["tenant_id"],
-            limit=int(body.get("limit", 20)),
-            api_token=body.get("api_token"),
-        )
-    except (KeyError, ValueError, AuthorizationError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
+        body = await _read_body(request) if request.method == "POST" else {}
+        limit = int(body.get("limit", request.query_params.get("limit", 100)))
+        return JSONResponse(list_audit_events(limit=limit, api_token=body.get("api_token")))
+    except (ValueError, AuthorizationError) as exc:
+        return _err(exc)
 
 
 class BearerAuthMiddleware:
+    """Reject /mcp requests that fail bearer-token validation."""
+
     def __init__(self, app: Any) -> None:
         self.app = app
 
@@ -461,17 +551,7 @@ class BearerAuthMiddleware:
             try:
                 validate_bearer_token(token)
             except AuthorizationError:
-                response = Response(
-                    "Unauthorized",
-                    status_code=401,
-                    headers={
-                        "WWW-Authenticate": (
-                            f'Bearer realm="mcp", resource_metadata="{RESOURCE_METADATA_URL}", '
-                            'scope="forecast anonymize retrain models audit", '
-                            'error="invalid_token", error_description="Provide a tenant-scoped SwiftForecast API key."'
-                        )
-                    },
-                )
+                response = Response("Unauthorized", status_code=401)
                 await response(scope, receive, send)
                 return
         await self.app(scope, receive, send)
@@ -487,18 +567,15 @@ def create_app() -> Starlette:
         lifespan=lifespan,
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
-            Route("/.well-known/oauth-protected-resource", protected_resource_metadata, methods=["GET"]),
-            Route("/api/forecast", rest_forecast, methods=["POST"]),
-            Route("/api/real-sequence", rest_real_sequence, methods=["POST"]),
-            Route("/api/adaptive-forecast", rest_adaptive_forecast, methods=["POST"]),
-            Route("/api/risk", rest_rank_at_risk, methods=["POST"]),
+            Route("/api/predict", rest_predict, methods=["POST"]),
+            Route("/api/scenarios", rest_scenarios, methods=["POST"]),
+            Route("/api/forecast-plan", rest_forecast_plan, methods=["POST"]),
+            Route("/api/personalize", rest_personalize, methods=["POST"]),
             Route("/api/anonymize", rest_anonymize, methods=["POST"]),
-            Route("/api/retraining", rest_trigger_retraining, methods=["POST"]),
-            Route("/api/retraining/status", rest_retraining_status, methods=["POST"]),
-            Route("/api/model-versions", rest_model_versions, methods=["POST"]),
-            Route("/api/audit-events", rest_audit_events, methods=["POST"]),
+            Route("/api/clients", rest_clients, methods=["GET", "POST"]),
+            Route("/api/audit", rest_audit, methods=["GET", "POST"]),
             Mount("/", app=mcp.streamable_http_app()),
-        ]
+        ],
     )
     app.add_middleware(
         CORSMiddleware,

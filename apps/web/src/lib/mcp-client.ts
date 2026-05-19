@@ -13,6 +13,9 @@ import type {
   BasketPrediction,
   ClientListResponse,
   ForecastPlanResponse,
+  ListAuditEventsResponse,
+  ListClientsResponse,
+  PersonalizeClientResponse,
   PersonalizationResponse,
   ScenarioResponse,
 } from "./types";
@@ -56,6 +59,14 @@ export type AuditRequest = {
   limit: number;
 };
 
+type ServerForecastPlanResponse = {
+  client_id: string;
+  chosen_strategy: string;
+  rationale: string;
+  payload: BasketPrediction | ScenarioResponse;
+  model_version: string;
+};
+
 async function postMcpService<T>(path: string, input: Record<string, unknown>, fallback: () => T): Promise<T> {
   const endpoint = process.env.MCP_REST_URL;
   if (!endpoint) {
@@ -72,7 +83,7 @@ async function postMcpService<T>(path: string, input: Record<string, unknown>, f
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         ...input,
-        api_token: process.env.MCP_DEMO_TOKEN ?? "sk_nexus_lab_demo",
+        api_token: process.env.MCP_DEMO_TOKEN,
       }),
       cache: "no-store",
       signal: controller.signal,
@@ -126,7 +137,62 @@ export async function requestClients(): Promise<ClientListResponse> {
     throw new Error(payload.error ?? `MCP service returned ${response.status}`);
   }
 
-  return (await response.json()) as ClientListResponse;
+  return normalizeClients((await response.json()) as ListClientsResponse | ClientListResponse);
+}
+
+function normalizeClients(response: ListClientsResponse | ClientListResponse): ClientListResponse {
+  if (response.clients.length === 0 || typeof response.clients[0] !== "string") {
+    return response as ClientListResponse;
+  }
+
+  return {
+    clients: (response as ListClientsResponse).clients.map((clientId) => ({
+      client_id: clientId,
+      display_name: clientId === "nexus_lab_solutions" ? "NexusLab Solutions" : clientId,
+      domain: clientId === "nexus_lab_solutions" ? "Chemistry research lab" : "Swiftron client",
+      status: clientId === "nexus_lab_solutions" ? "demo" : "available",
+      last_order_week: "from model bundle",
+    })),
+  };
+}
+
+function isScenarioResponse(payload: BasketPrediction | ScenarioResponse): payload is ScenarioResponse {
+  return "scenarios" in payload;
+}
+
+function normalizeForecastPlan(response: ServerForecastPlanResponse, intent: string): ForecastPlanResponse {
+  const payload = response.payload;
+  const scenarios = isScenarioResponse(payload) ? payload.scenarios : [];
+  const predictedBasket = isScenarioResponse(payload) ? createLocalBasketPrediction() : payload;
+
+  return {
+    client_id: response.client_id,
+    intent,
+    selected_strategy: response.chosen_strategy,
+    decoder_config: isScenarioResponse(payload)
+      ? (payload.decoder_config ?? { strategy: response.chosen_strategy })
+      : payload.decoder_config,
+    recommendation_summary: response.rationale,
+    predicted_basket: predictedBasket,
+    scenarios,
+  };
+}
+
+function normalizePersonalization(
+  response: PersonalizeClientResponse,
+  additionalTokens: string[],
+): PersonalizationResponse {
+  return {
+    client_id: response.client_id,
+    session_id: response.session_id,
+    added_tokens: response.additional_tokens,
+    before: createLocalBasketPrediction(),
+    after: response.prediction,
+    delta_notes: [
+      `${additionalTokens.length} sensor tokens applied to this session.`,
+      `Decoder strategy returned: ${response.prediction.decoder_config.strategy}.`,
+    ],
+  };
 }
 
 export async function requestPrediction(input: PredictRequest): Promise<BasketPrediction> {
@@ -138,11 +204,39 @@ export async function requestScenarios(input: ScenariosRequest): Promise<Scenari
 }
 
 export async function requestForecastPlan(input: ForecastPlanRequest): Promise<ForecastPlanResponse> {
-  return postMcpService("/api/forecast-plan", input, () => createLocalForecastPlan(input.intent));
+  const response = await postMcpService<ServerForecastPlanResponse>(
+    "/api/forecast-plan",
+    {
+      client_id: input.client_id,
+      objective_text: input.intent,
+      horizon_hint: 8,
+    },
+    () => ({
+      client_id: input.client_id,
+      chosen_strategy: "beam_search",
+      rationale: createLocalForecastPlan(input.intent).recommendation_summary,
+      payload: createLocalScenarios(),
+      model_version: "swiftron-onnx-v1",
+    }),
+  );
+  return normalizeForecastPlan(response, input.intent);
 }
 
 export async function requestPersonalization(input: PersonalizeRequest): Promise<PersonalizationResponse> {
-  return postMcpService("/api/personalize", input, () => createLocalPersonalization(input.additional_tokens));
+  const response = await postMcpService<PersonalizeClientResponse>(
+    "/api/personalize",
+    input,
+    () => {
+      const fallback = createLocalPersonalization(input.additional_tokens);
+      return {
+        session_id: fallback.session_id,
+        client_id: fallback.client_id,
+        additional_tokens: fallback.added_tokens,
+        prediction: fallback.after,
+      };
+    },
+  );
+  return normalizePersonalization(response, input.additional_tokens);
 }
 
 export async function requestAnonymization(input: AnonymizeRequest): Promise<AnonymizationResponse> {
@@ -150,5 +244,13 @@ export async function requestAnonymization(input: AnonymizeRequest): Promise<Ano
 }
 
 export async function requestAuditEvents(input: AuditRequest): Promise<AuditEventsResponse> {
-  return postMcpService("/api/audit", input, () => createLocalAuditEvents());
+  const response = await postMcpService<ListAuditEventsResponse | AuditEventsResponse>(
+    "/api/audit",
+    input,
+    () => createLocalAuditEvents(),
+  );
+  return {
+    events: response.events,
+    count: "count" in response ? response.count : response.events.length,
+  };
 }

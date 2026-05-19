@@ -21,21 +21,23 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 - [ ] Update .env.example with new vars
 
 ### Tuesday May 19
-- [ ] Tool 1: predict_next_basket (wraps real_model.py from Lane C)
-- [ ] Tool 2: predict_scenarios (wraps beam_search.py from Lane C)
-- [ ] Audit log integration: every tool call recorded
+- [X] Tool 1: predict_next_basket (wraps real_model.py from Lane C)
+- [X] Tool 2: predict_scenarios (wraps real_model.py.run_beam from Lane C)
+- [X] Audit log integration: every tool call recorded
+- [X] (pulled forward) Tool 3: forecast_plan (adaptive strategy selection)
+- [X] (pulled forward) Tool 4: personalize_client (wraps sensor.py from Lane C)
+- [X] (pulled forward) Tool 5: anonymize_and_tokenize_orders (wraps tokenize_orders.py from Lane C)
+- [X] (pulled forward) Tool 6: list_clients, list_audit_events
+- [X] (pulled forward) Resources: swift://model-card, swift://dataset-card, swift://prediction/latest
+- [X] (pulled forward) Prompt: procurement_planning_review
 - Flix interview 12:00-14:30, async deliverables only
 
 ### Wednesday May 20
-- [ ] Tool 3: forecast_plan (adaptive strategy selection)
-- [ ] Tool 4: personalize_client (wraps sensor.py from Lane C)
-- [ ] Resources: swift://model-card, swift://dataset-card
+- [ ] MCP Inspector regression on all 6 tools end-to-end
+- [ ] Confirm REST mirrors stay stable after Lane C merges sensor.py/tokenize_orders.py/beam_search.py to main
 
 ### Thursday May 21
-- [ ] Tool 5: anonymize_and_tokenize_orders (wraps Lane C utilities)
-- [ ] Tool 6: list_clients, list_audit_events
-- [ ] Prompt: procurement_planning_review
-- [ ] MCP Inspector regression test on all 6 tools
+- [ ] Coordinate merge to main with Lane B types.ts swap and Lane C tests
 
 ### Friday May 22
 - [ ] Final smoke test
@@ -104,4 +106,11 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 
 | Date | Lane | Item | Commit |
 |------|------|------|--------|
-| | | | |
+| 2026-05-19 | A | tool_schemas.py + store.py + server.py scaffolding | beb1170 |
+| 2026-05-19 | A | predict_next_basket + /api/predict | 8bf0467 |
+| 2026-05-19 | A | predict_scenarios + /api/scenarios | 8e4844f |
+| 2026-05-19 | A | forecast_plan + /api/forecast-plan | 9887b84 |
+| 2026-05-19 | A | personalize_client + /api/personalize | 442f73a |
+| 2026-05-19 | A | anonymize_and_tokenize_orders + /api/anonymize | a7b1a68 |
+| 2026-05-19 | A | list_clients + list_audit_events + /api/clients + /api/audit | fdf331e |
+| 2026-05-19 | A | swift:// resources + procurement_planning_review prompt | 0eb8ae1 |

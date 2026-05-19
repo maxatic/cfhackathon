@@ -14,30 +14,16 @@ class Identity:
 
 
 API_KEYS: dict[str, Identity] = {
-    "sk_northstar_forecast_full": Identity(
-        subject="agent-northstar-demand-planner",
-        tenant_id="tenant_northstar",
-        scopes=frozenset({"forecast", "anonymize", "retrain", "models", "audit"}),
-        key_id="key_northstar_full",
-    ),
-    "sk_northstar_forecast_read": Identity(
-        subject="agent-northstar-viewer",
-        tenant_id="tenant_northstar",
-        scopes=frozenset({"forecast", "models", "audit"}),
-        key_id="key_northstar_read",
-    ),
-    "sk_apex_forecast_full": Identity(
-        subject="agent-apex-demand-planner",
-        tenant_id="tenant_apex",
-        scopes=frozenset({"forecast", "anonymize", "retrain", "models", "audit"}),
-        key_id="key_apex_full",
+    "sk_nexus_lab_forecast_full": Identity(
+        subject="agent-nexus-lab-demand-planner",
+        tenant_id="nexus_lab_solutions",
+        scopes=frozenset({"forecast", "anonymize", "models", "audit"}),
+        key_id="key_nexus_lab_full",
     ),
 }
 
 DEMO_TOKEN_ALIASES = {
-    "demo_northstar_full": "sk_northstar_forecast_full",
-    "demo_northstar_read": "sk_northstar_forecast_read",
-    "demo_apex_full": "sk_apex_forecast_full",
+    "demo_nexus_lab_full": "sk_nexus_lab_forecast_full",
 }
 
 
@@ -48,12 +34,12 @@ class AuthorizationError(ValueError):
 def validate_bearer_token(token: str | None) -> Identity:
     configured = getenv("MCP_DEMO_TOKEN")
     if configured and token == configured:
-        return API_KEYS["sk_northstar_forecast_full"]
+        return API_KEYS["sk_nexus_lab_forecast_full"]
     normalized = DEMO_TOKEN_ALIASES.get(token or "", token)
     if normalized in API_KEYS:
         return API_KEYS[normalized]
     raise AuthorizationError(
-        "Invalid API key. Use a tenant-scoped demo key such as sk_northstar_forecast_full or configure MCP_DEMO_TOKEN."
+        "Invalid API key. Use the demo key sk_nexus_lab_forecast_full or configure MCP_DEMO_TOKEN."
     )
 
 
@@ -77,7 +63,7 @@ def authorize_tool(
         return Identity(
             subject="transport-authenticated-agent",
             tenant_id=tenant_id,
-            scopes=frozenset({"forecast", "anonymize", "retrain", "models", "audit"}),
+            scopes=frozenset({"forecast", "anonymize", "models", "audit"}),
             key_id="transport-trusted",
         )
 
