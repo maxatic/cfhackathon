@@ -12,6 +12,18 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-19 10:00
+shipped: nothing yet today, Monday work pushed last night to lane-a-server.
+working: drafting tool_schemas.py + store.py + scaffolding server.py for the 6 locked tools per handoffs 1-5. Will wire predict_next_basket and predict_scenarios first since Lane C's real_model.py is validated on this Mac.
+next: forecast_plan adaptive routing, personalize_client wrapping Lane C's sensor.py, anonymize_and_tokenize_orders wrapping Lane C's tokenize_orders.py, list_clients, list_audit_events, swift://* resources, procurement_planning_review prompt. Will smoke-test every REST route with curl before each commit.
+asks: Maxat — handoff posted in handoffs.md with the new TypeScript types I added to types.ts (additively, no deletions). Update mcp-client.ts to call /api/predict, /api/scenarios, /api/forecast-plan, /api/personalize, /api/anonymize, /api/audit, /api/clients when you're ready. Sherniyaz — Lane C wrappers behaved correctly under real ONNX inference; no changes needed from you for the wire-up itself.
+
+### 2026-05-19 11:50
+shipped: all 6 locked MCP tools + REST mirrors + 3 swift:// resources + procurement_planning_review prompt on lane-a-server (9 commits, beb1170..0eb8ae1). Smoke-tested every REST endpoint against the real Swiftron bundle on my Mac: /api/clients returns 169 clients, /api/predict generates 6 tokens with correct dt_2w time delta, /api/scenarios returns 3 ranked beams with descending joint_log_prob, /api/forecast-plan routes to beam vs top_k from objective_text keywords, /api/personalize swaps sensor and produces sensor_profile strategy, /api/anonymize hashes customer_name+email and scrubs ship_to_address, /api/audit shows all 8 success events plus 1 error event from the bad-payload path. Error paths return 400 with a clear message.
+working: nothing, blocked on Flix interview from 12:00-14:30.
+next: at 15:00 standup, push lane-a-server to origin and ping the team. Hold off on PR to main until Sherniyaz confirms Lane C's beam_search.py / sensor.py / tokenize_orders.py are merge-ready and Maxat confirms types.ts swap.
+asks: Maxat — when you wire mcp-client.ts, drop `process.env.MCP_DEMO_TOKEN ?? "sk_northstar_forecast_full"` to just `process.env.MCP_DEMO_TOKEN` (the northstar fallback is dead). Sherniyaz — Tuesday morning Pytest cases in services/mcp/tests/ should cover the 6 tools, not the deleted MiniTransformerForecaster.
+
 ### 2026-05-18 19:00
 shipped: nothing since 15:00, Lane A Monday tasks complete on lane-a-server (8 commits)
 working: nothing, Monday work done
