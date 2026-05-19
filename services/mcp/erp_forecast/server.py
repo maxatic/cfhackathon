@@ -267,6 +267,31 @@ def personalize_client(
         return payload
 
 
+@mcp.tool()
+def anonymize_and_tokenize_orders(
+    raw_rows: list[dict[str, Any]],
+    client_id: str = DEMO_TENANT_ID,
+    api_token: str | None = None,
+) -> dict[str, Any]:
+    """PII scrub raw ERP rows, then map them to the client's Swiftron vocabulary."""
+    with _AuditContext(
+        STORE,
+        "anonymize_and_tokenize_orders",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["anonymize_and_tokenize_orders"],
+        api_token,
+    ):
+        try:
+            tokenize_orders = _load_tokenize_orders()
+            result = tokenize_orders.anonymize_and_tokenize(
+                raw_rows=raw_rows,
+                client_id=client_id,
+            )
+        except Exception as exc:
+            raise ValueError(f"anonymize_and_tokenize_orders failed: {exc}") from exc
+        return result
+
+
 async def healthz(_request: Request) -> JSONResponse:
     """Plain liveness probe for Docker and Vercel."""
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
@@ -355,6 +380,23 @@ async def rest_personalize(request: Request) -> JSONResponse:
         return _err(exc)
 
 
+async def rest_anonymize(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request)
+        raw_rows = body.get("raw_rows")
+        if not isinstance(raw_rows, list):
+            raise ValueError("raw_rows must be a JSON array of objects.")
+        return JSONResponse(
+            anonymize_and_tokenize_orders(
+                raw_rows=raw_rows,
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                api_token=body.get("api_token"),
+            )
+        )
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
+
+
 class BearerAuthMiddleware:
     """Reject /mcp requests that fail bearer-token validation."""
 
@@ -389,6 +431,7 @@ def create_app() -> Starlette:
             Route("/api/scenarios", rest_scenarios, methods=["POST"]),
             Route("/api/forecast-plan", rest_forecast_plan, methods=["POST"]),
             Route("/api/personalize", rest_personalize, methods=["POST"]),
+            Route("/api/anonymize", rest_anonymize, methods=["POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
     )
