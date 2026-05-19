@@ -1,71 +1,70 @@
 import {
   createLocalAnonymization,
   createLocalAuditEvents,
-  createLocalForecast,
-  createLocalModelVersions,
-  createLocalRealSequence,
-  createLocalRetrainingJob,
-  createLocalRisk,
+  createLocalBasketPrediction,
+  createLocalClients,
+  createLocalForecastPlan,
+  createLocalPersonalization,
+  createLocalScenarios,
 } from "./demo-data";
 import type {
   AnonymizationResponse,
   AuditEventsResponse,
-  ForecastRun,
-  ModelVersionsResponse,
-  RealSequenceResponse,
-  RetrainingJob,
-  RiskResponse,
+  BasketPrediction,
+  ClientListResponse,
+  ForecastPlanResponse,
+  ListAuditEventsResponse,
+  ListClientsResponse,
+  PersonalizeClientResponse,
+  PersonalizationResponse,
+  ScenarioResponse,
 } from "./types";
 
-export type ForecastRequest = {
-  tenant_id: string;
-  sku: string;
-  customer_segment: string;
-  horizon_weeks: number;
-};
+const SERVICE_TIMEOUT_MS = 1800;
 
-export type RiskRequest = {
-  tenant_id: string;
-  sku: string;
-  horizon_weeks: number;
-  limit: number;
-};
-
-export type AnonymizationRequest = {
-  tenant_id: string;
-  sku: string;
-  customer_segment: string;
-  sample_size: number;
-  raw_order_rows?: Array<Record<string, unknown>>;
-};
-
-export type ModelVersionsRequest = {
-  tenant_id: string;
-};
-
-export type RetrainingRequest = {
-  tenant_id: string;
-  reason: string;
-};
-
-export type RetrainingStatusRequest = {
-  tenant_id: string;
-  job_id: string;
-  poll_count?: number;
-};
-
-export type AuditEventsRequest = {
-  tenant_id: string;
-  limit: number;
-};
-
-export type RealSequenceRequest = {
+export type PredictRequest = {
   client_id: string;
-  start_sequence?: string;
+  start_sequence?: string[];
   max_generate: number;
-  temperature: number;
   top_k: number;
-  seed: number;
+  temperature: number;
+  seed?: number;
+};
+
+export type ScenariosRequest = {
+  client_id: string;
+  start_sequence?: string[];
+  beam_width: number;
+  horizon: number;
+  temperature: number;
+};
+
+export type ForecastPlanRequest = {
+  client_id: string;
+  intent: string;
+};
+
+export type PersonalizeRequest = {
+  client_id: string;
+  additional_tokens: string[];
+};
+
+export type AnonymizeRequest = {
+  client_id: string;
+  raw_rows?: Array<Record<string, unknown>>;
+};
+
+export type AuditRequest = {
+  client_id?: string;
+  limit: number;
+};
+
+type ServerForecastPlanResponse = {
+  client_id: string;
+  chosen_strategy: string;
+  rationale: string;
+  payload: BasketPrediction | ScenarioResponse;
+  model_version: string;
 };
 
 async function postMcpService<T>(path: string, input: Record<string, unknown>, fallback: () => T): Promise<T> {
@@ -74,17 +73,31 @@ async function postMcpService<T>(path: string, input: Record<string, unknown>, f
     return fallback();
   }
 
-  const response = await fetch(`${endpoint}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...input,
-      api_token: process.env.MCP_DEMO_TOKEN ?? "sk_northstar_forecast_full",
-    }),
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SERVICE_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch(`${endpoint}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...input,
+        api_token: process.env.MCP_DEMO_TOKEN,
+      }),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch {
+    return fallback();
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
+    if (process.env.MCP_REST_STRICT !== "1") {
+      return fallback();
+    }
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
     const detail = payload.error ? `: ${payload.error}` : "";
     throw new Error(`MCP service returned ${response.status}${detail}`);
@@ -93,40 +106,151 @@ async function postMcpService<T>(path: string, input: Record<string, unknown>, f
   return (await response.json()) as T;
 }
 
-export async function requestForecast(input: ForecastRequest): Promise<ForecastRun> {
-  return postMcpService("/api/forecast", input, () =>
-    createLocalForecast(input.sku, input.customer_segment, input.horizon_weeks),
+export async function requestClients(): Promise<ClientListResponse> {
+  const endpoint = process.env.MCP_REST_URL;
+  if (!endpoint) {
+    return createLocalClients();
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SERVICE_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch(`${endpoint}/api/clients`, {
+      method: "GET",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch {
+    return createLocalClients();
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    if (process.env.MCP_REST_STRICT !== "1") {
+      return createLocalClients();
+    }
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error ?? `MCP service returned ${response.status}`);
+  }
+
+  return normalizeClients((await response.json()) as ListClientsResponse | ClientListResponse);
+}
+
+function normalizeClients(response: ListClientsResponse | ClientListResponse): ClientListResponse {
+  if (response.clients.length === 0 || typeof response.clients[0] !== "string") {
+    return response as ClientListResponse;
+  }
+
+  return {
+    clients: (response as ListClientsResponse).clients.map((clientId) => ({
+      client_id: clientId,
+      display_name: clientId === "nexus_lab_solutions" ? "NexusLab Solutions" : clientId,
+      domain: clientId === "nexus_lab_solutions" ? "Chemistry research lab" : "Swiftron client",
+      status: clientId === "nexus_lab_solutions" ? "demo" : "available",
+      last_order_week: "from model bundle",
+    })),
+  };
+}
+
+function isScenarioResponse(payload: BasketPrediction | ScenarioResponse): payload is ScenarioResponse {
+  return "scenarios" in payload;
+}
+
+function normalizeForecastPlan(response: ServerForecastPlanResponse, intent: string): ForecastPlanResponse {
+  const payload = response.payload;
+  const scenarios = isScenarioResponse(payload) ? payload.scenarios : [];
+  const predictedBasket = isScenarioResponse(payload) ? createLocalBasketPrediction() : payload;
+
+  return {
+    client_id: response.client_id,
+    intent,
+    selected_strategy: response.chosen_strategy,
+    decoder_config: isScenarioResponse(payload)
+      ? (payload.decoder_config ?? { strategy: response.chosen_strategy })
+      : payload.decoder_config,
+    recommendation_summary: response.rationale,
+    predicted_basket: predictedBasket,
+    scenarios,
+  };
+}
+
+function normalizePersonalization(
+  response: PersonalizeClientResponse,
+  additionalTokens: string[],
+): PersonalizationResponse {
+  return {
+    client_id: response.client_id,
+    session_id: response.session_id,
+    added_tokens: response.additional_tokens,
+    before: createLocalBasketPrediction(),
+    after: response.prediction,
+    delta_notes: [
+      `${additionalTokens.length} sensor tokens applied to this session.`,
+      `Decoder strategy returned: ${response.prediction.decoder_config.strategy}.`,
+    ],
+  };
+}
+
+export async function requestPrediction(input: PredictRequest): Promise<BasketPrediction> {
+  return postMcpService("/api/predict", input, () => createLocalBasketPrediction());
+}
+
+export async function requestScenarios(input: ScenariosRequest): Promise<ScenarioResponse> {
+  return postMcpService("/api/scenarios", input, () => createLocalScenarios());
+}
+
+export async function requestForecastPlan(input: ForecastPlanRequest): Promise<ForecastPlanResponse> {
+  const response = await postMcpService<ServerForecastPlanResponse>(
+    "/api/forecast-plan",
+    {
+      client_id: input.client_id,
+      objective_text: input.intent,
+      horizon_hint: 8,
+    },
+    () => ({
+      client_id: input.client_id,
+      chosen_strategy: "beam_search",
+      rationale: createLocalForecastPlan(input.intent).recommendation_summary,
+      payload: createLocalScenarios(),
+      model_version: "swiftron-onnx-v1",
+    }),
   );
+  return normalizeForecastPlan(response, input.intent);
 }
 
-export async function requestRisk(input: RiskRequest): Promise<RiskResponse> {
-  return postMcpService("/api/risk", input, () => createLocalRisk(input.sku, input.horizon_weeks, input.limit));
-}
-
-export async function requestAnonymization(input: AnonymizationRequest): Promise<AnonymizationResponse> {
-  return postMcpService("/api/anonymize", input, () =>
-    createLocalAnonymization(input.sku, input.customer_segment, input.sample_size),
+export async function requestPersonalization(input: PersonalizeRequest): Promise<PersonalizationResponse> {
+  const response = await postMcpService<PersonalizeClientResponse>(
+    "/api/personalize",
+    input,
+    () => {
+      const fallback = createLocalPersonalization(input.additional_tokens);
+      return {
+        session_id: fallback.session_id,
+        client_id: fallback.client_id,
+        additional_tokens: fallback.added_tokens,
+        prediction: fallback.after,
+      };
+    },
   );
+  return normalizePersonalization(response, input.additional_tokens);
 }
 
-export async function requestModelVersions(input: ModelVersionsRequest): Promise<ModelVersionsResponse> {
-  return postMcpService("/api/model-versions", input, () => createLocalModelVersions());
+export async function requestAnonymization(input: AnonymizeRequest): Promise<AnonymizationResponse> {
+  return postMcpService("/api/anonymize", input, () => createLocalAnonymization());
 }
 
-export async function triggerRetraining(input: RetrainingRequest): Promise<RetrainingJob> {
-  return postMcpService("/api/retraining", input, () => createLocalRetrainingJob("queued"));
-}
-
-export async function requestRetrainingStatus(input: RetrainingStatusRequest): Promise<RetrainingJob> {
-  return postMcpService("/api/retraining/status", input, () =>
-    createLocalRetrainingJob(input.poll_count && input.poll_count > 1 ? "completed" : "running", input.job_id),
+export async function requestAuditEvents(input: AuditRequest): Promise<AuditEventsResponse> {
+  const response = await postMcpService<ListAuditEventsResponse | AuditEventsResponse>(
+    "/api/audit",
+    input,
+    () => createLocalAuditEvents(),
   );
-}
-
-export async function requestAuditEvents(input: AuditEventsRequest): Promise<AuditEventsResponse> {
-  return postMcpService("/api/audit-events", input, () => createLocalAuditEvents());
-}
-
-export async function requestRealSequence(input: RealSequenceRequest): Promise<RealSequenceResponse> {
-  return postMcpService("/api/real-sequence", input, () => createLocalRealSequence());
+  return {
+    events: response.events,
+    count: "count" in response ? response.count : response.events.length,
+  };
 }

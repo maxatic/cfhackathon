@@ -182,14 +182,14 @@ status: accepted
   GET /api/audit?limit=20
     -> {"tenant_id":"nexus_lab_solutions","events":[{"event_id":"...","tool_name":"predict_next_basket","status":"success","latency_ms":265, ...}],"count":N}
   ```
-  status: pending
+  status: done
 
 - [A to B] [15:00 2026-05-18]
   context: Lane A's Monday string-strip pass deliberately did not touch any file under `apps/web/` per lane ownership in AGENTS.md. Lane B owns dashboard cleanup.
   asks: Strip Northstar/Apex/NSI-VAL-100/mini-transformer references and hardcode `nexus_lab_solutions` where a single-tenant value is needed.
   contract: After the strip, `grep -rIn -e tenant_northstar -e tenant_apex -e Northstar -e Apex -e NSI-VAL-100 -e mini-transformer apps/web/` returns no hits.
   example: file `apps/web/src/lib/demo-data.ts` currently has hits on lines 14, 15, 19, 84, 227, 280, 285, 333. Replace tenant id with `nexus_lab_solutions`, drop the synthetic SKU rows, and replace `mini-transformer-v1` model_version strings with `swiftron-onnx-v1`.
-  status: pending
+  status: done
 
 - [A to C] [15:00 2026-05-18]
   context: Lane A's Monday string-strip pass deliberately did not touch `docs/demo-script.md` or any file under `services/mcp/tests/` per lane ownership in AGENTS.md. Lane A also deleted `services/mcp/erp_forecast/model.py`, `data.py`, and `jobs.py`, which `services/mcp/tests/test_core.py` still imports.

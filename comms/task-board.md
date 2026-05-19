@@ -48,25 +48,25 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 ## Lane B — Dashboard (Maxat, Codex CLI)
 
 ### Monday May 18
-- [ ] Strip Northstar references from demo-data.ts
-- [ ] Strip NSI-VAL-100, tenant_northstar, tenant_apex everywhere
-- [ ] Hardcode demo client picker to nexus_lab_solutions
-- [ ] Confirm dashboard still loads with no console errors
+- [X] Strip Northstar references from demo-data.ts
+- [X] Strip NSI-VAL-100, tenant_northstar, tenant_apex everywhere
+- [X] Hardcode demo client picker to nexus_lab_solutions
+- [X] Confirm dashboard still loads with no console errors
 
 ### Tuesday May 19
-- [ ] Basket sequence display panel (groups tokens by time delta)
-- [ ] Scenario comparison panel (3+ beams side by side)
-- [ ] Wire new MCP tools through REST mirror routes in apps/web/src/app/api/
+- [X] Basket sequence display panel (groups tokens by time delta)
+- [X] Scenario comparison panel (3+ beams side by side)
+- [X] Wire new MCP tools through REST mirror routes in apps/web/src/app/api/
 
 ### Wednesday May 20
-- [ ] Sensor swap panel (before/after with visual diff)
-- [ ] Anonymization audit panel (shows PII scrub + token mapping)
-- [ ] Vercel preview deployment URL working
+- [X] Sensor swap panel (before/after with visual diff)
+- [X] Anonymization audit panel (shows PII scrub + token mapping)
+- [X] Vercel preview deployment URL working
 
 ### Thursday May 21
 - [ ] Vercel production deploy
-- [ ] Polish: loading states, error states, empty states
-- [ ] Mobile responsive check (judges may glance at phone)
+- [X] Polish: loading states, error states, empty states
+- [X] Mobile responsive check (judges may glance at phone)
 
 ### Friday May 22
 - [ ] Demo day

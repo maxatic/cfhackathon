@@ -3,56 +3,53 @@
 import {
   Activity,
   AlertTriangle,
-  Box,
   CheckCircle2,
   Database,
-  KeyRound,
+  Fingerprint,
+  GitCompare,
   Loader2,
   Network,
   Play,
-  RefreshCcw,
+  ScanSearch,
   ShieldCheck,
-  Sparkles,
+  SlidersHorizontal,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  createLocalBeams,
+  createLocalAnonymization,
   createLocalAuditEvents,
-  createLocalForecast,
-  createLocalModelVersions,
-  createLocalRisk,
-  products,
-  segments,
-  tenant,
+  createLocalBasketPrediction,
+  createLocalClients,
+  createLocalForecastPlan,
+  createLocalPersonalization,
+  createLocalScenarios,
+  demoClient,
+  intentOptions,
+  sensorTokenOptions,
 } from "@/lib/demo-data";
 import type {
   AnonymizationResponse,
   AuditEventsResponse,
-  BeamScenario,
-  ForecastRun,
-  ModelVersionsResponse,
-  RealSequenceResponse,
-  RetrainingJob,
-  RiskResponse,
+  BasketPrediction,
+  ClientListResponse,
+  ForecastPlanResponse,
+  PersonalizationResponse,
+  ScenarioResponse,
+  ScenarioTrajectory,
 } from "@/lib/types";
 
-type ActionPanel = "risk" | "models" | "anonymization" | "retraining" | "realModel";
-type LoadingAction = ActionPanel | "forecast" | "audit" | null;
+type ActionPanel = "plan" | "personalize" | "anonymize" | "audit";
+type LoadingAction = ActionPanel | "predict" | "scenarios" | null;
 
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
+function formatDelta(days: number): string {
+  if (days === 0) {
+    return "same basket";
+  }
+  return `${days}d later`;
 }
 
-function formatMoney(value: number): string {
-  return `$${formatNumber(Math.round(value))}`;
-}
-
-function formatPercent(value: number): string {
-  return `${Number(value).toFixed(value % 1 === 0 ? 0 : 1)}%`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+function formatLogProb(value: number): string {
+  return value.toFixed(1);
 }
 
 async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
@@ -68,85 +65,47 @@ async function postJson<T>(url: string, body: Record<string, unknown>): Promise<
   return payload as T;
 }
 
-function ForecastChart({ run }: { run: ForecastRun }) {
-  const points = [...run.history_tail.map((item) => item.quantity), ...run.forecast.map((item) => item.predicted_quantity)];
-  const min = Math.min(...points) * 0.9;
-  const max = Math.max(...points) * 1.08;
-  const width = 760;
-  const height = 250;
-  const xStep = width / Math.max(points.length - 1, 1);
-  const y = (value: number) => height - ((value - min) / (max - min || 1)) * height;
-  const historyPath = run.history_tail
-    .map((item, index) => `${index === 0 ? "M" : "L"} ${index * xStep} ${y(item.quantity)}`)
-    .join(" ");
-  const forecastOffset = run.history_tail.length - 1;
-  const forecastPath = [run.history_tail.at(-1)?.quantity ?? points[0], ...run.forecast.map((item) => item.predicted_quantity)]
-    .map((value, index) => `${index === 0 ? "M" : "L"} ${(forecastOffset + index) * xStep} ${y(value)}`)
-    .join(" ");
+function groupTokens(tokens: string[], deltas: number[]) {
+  return tokens.reduce<Array<{ label: string; tokens: string[] }>>((groups, token, index) => {
+    const delta = deltas[index] ?? 0;
+    if (index === 0 || delta > 0 || groups.length === 0) {
+      groups.push({ label: formatDelta(delta), tokens: [token] });
+      return groups;
+    }
+    groups[groups.length - 1]?.tokens.push(token);
+    return groups;
+  }, []);
+}
+
+function TokenGroups({ tokens, deltas }: { tokens: string[]; deltas: number[] }) {
+  const groups = groupTokens(tokens, deltas);
 
   return (
-    <div className="chart" aria-label="Forecast chart">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img">
-        <defs>
-          <linearGradient id="forecast-fill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#b8e23b" stopOpacity="0.35" />
-            <stop offset="100%" stopColor="#b8e23b" stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
-        {[0, 1, 2, 3].map((line) => (
-          <line
-            key={line}
-            x1="0"
-            x2={width}
-            y1={(height / 4) * line}
-            y2={(height / 4) * line}
-            stroke="#30352e"
-            strokeWidth="1"
-          />
-        ))}
-        <path d={`${forecastPath} L ${width} ${height} L ${forecastOffset * xStep} ${height} Z`} fill="url(#forecast-fill)" />
-        <path d={historyPath} fill="none" stroke="#7ca7ff" strokeWidth="3" />
-        <path d={forecastPath} fill="none" stroke="#b8e23b" strokeWidth="3" strokeDasharray="7 7" />
-        {run.forecast.map((point, index) => (
-          <circle
-            key={point.week}
-            cx={(forecastOffset + index + 1) * xStep}
-            cy={y(point.predicted_quantity)}
-            r="4"
-            fill="#b8e23b"
-          />
-        ))}
-      </svg>
+    <div className="timeline">
+      {groups.map((group, index) => (
+        <div className="timeline-group" key={`${group.label}-${index}`}>
+          <span>{group.label}</span>
+          <div className="token-list">
+            {group.tokens.map((token, tokenIndex) => (
+              <code key={`${token}-${tokenIndex}`}>{token}</code>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-function LossCurve({ job }: { job: RetrainingJob | null }) {
-  if (!job) {
-    return <div className="empty-state">Start retraining to see the queued job, loss curve, and model handoff.</div>;
-  }
-  const maxLoss = Math.max(...job.loss_curve.flatMap((point) => [point.train_loss, point.validation_loss]), 1);
-
+function ScenarioCard({ scenario }: { scenario: ScenarioTrajectory }) {
   return (
-    <div className="loss-curve" aria-label="Retraining loss curve">
-      {job.loss_curve.map((point) => (
-        <div className="loss-step" key={point.step}>
-          <div className="loss-bars">
-            <span
-              className="loss-bar train"
-              title={`train ${point.train_loss}`}
-              style={{ height: `${Math.max(10, (point.train_loss / maxLoss) * 100)}%` }}
-            />
-            <span
-              className="loss-bar validation"
-              title={`validation ${point.validation_loss}`}
-              style={{ height: `${Math.max(10, (point.validation_loss / maxLoss) * 100)}%` }}
-            />
-          </div>
-          <small>{point.step}</small>
-        </div>
-      ))}
-    </div>
+    <article className="scenario-card">
+      <div className="scenario-rank">#{scenario.rank}</div>
+      <div>
+        <span>joint log-prob</span>
+        <strong>{formatLogProb(scenario.joint_log_prob)}</strong>
+      </div>
+      <TokenGroups tokens={scenario.tokens} deltas={scenario.time_deltas} />
+    </article>
   );
 }
 
@@ -174,129 +133,181 @@ function ActionNotice({
 }
 
 export function Dashboard() {
-  const initialRun = createLocalForecast(products[0].sku, "all", 12);
-  const [sku, setSku] = useState(products[0].sku);
-  const [segment, setSegment] = useState("all");
-  const [horizon, setHorizon] = useState(12);
-  const [run, setRun] = useState<ForecastRun>(initialRun);
-  const [beams, setBeams] = useState<BeamScenario[]>(() => createLocalBeams(initialRun));
-  const [risk, setRisk] = useState<RiskResponse>(() => createLocalRisk(products[0].sku, 12, 5));
-  const [models, setModels] = useState<ModelVersionsResponse>(() => createLocalModelVersions());
+  const [clientId] = useState(demoClient.client_id);
+  const [intent, setIntent] = useState(intentOptions[0]);
+  const [maxGenerate, setMaxGenerate] = useState(8);
+  const [topK, setTopK] = useState(5);
+  const [temperature, setTemperature] = useState(1);
+  const [beamWidth, setBeamWidth] = useState(3);
+  const [horizon, setHorizon] = useState(8);
+  const [selectedSensorTokens, setSelectedSensorTokens] = useState<string[]>(sensorTokenOptions.slice(0, 2));
+  const [prediction, setPrediction] = useState<BasketPrediction>(() => createLocalBasketPrediction());
+  const [scenarios, setScenarios] = useState<ScenarioResponse>(() => createLocalScenarios());
+  const [plan, setPlan] = useState<ForecastPlanResponse>(() => createLocalForecastPlan(intentOptions[0]));
+  const [personalization, setPersonalization] = useState<PersonalizationResponse>(() => createLocalPersonalization());
+  const [anonymization, setAnonymization] = useState<AnonymizationResponse>(() => createLocalAnonymization());
   const [audit, setAudit] = useState<AuditEventsResponse>(() => createLocalAuditEvents());
-  const [realSequence, setRealSequence] = useState<RealSequenceResponse | null>(null);
-  const [anonymization, setAnonymization] = useState<AnonymizationResponse | null>(null);
-  const [retraining, setRetraining] = useState<RetrainingJob | null>(null);
-  const [activePanel, setActivePanel] = useState<ActionPanel>("risk");
+  const [clients, setClients] = useState<ClientListResponse>(() => createLocalClients());
+  const [activePanel, setActivePanel] = useState<ActionPanel>("plan");
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
-  const [status, setStatus] = useState("Local forecast ready");
+  const [status, setStatus] = useState("Local fallback ready");
   const [error, setError] = useState<string | null>(null);
-  const [panelMessage, setPanelMessage] = useState("At-risk customer workflow ready");
+  const [panelMessage, setPanelMessage] = useState("Forecast plan ready");
   const [panelError, setPanelError] = useState<string | null>(null);
 
-  const totalUnits = useMemo(
-    () => run.forecast.reduce((sum, point) => sum + point.predicted_quantity, 0),
-    [run],
+  const generatedProductCount = useMemo(
+    () => prediction.generated_tokens.filter((token) => !token.startsWith("<dt_")).length,
+    [prediction.generated_tokens],
   );
-  const revenue = useMemo(() => {
-    const product = products.find((item) => item.sku === run.sku) ?? products[0];
-    return totalUnits * product.unit_price;
-  }, [run.sku, totalUnits]);
-  const activeModel = models.model_versions.find((model) => model.status === "active") ?? models.model_versions[0];
+  const bestScenario = scenarios.scenarios[0];
+  const activeClient = clients.clients.find((client) => client.client_id === clientId) ?? demoClient;
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadClients() {
+      try {
+        const response = await fetch("/api/clients", { method: "GET" });
+        const payload = (await response.json().catch(() => ({}))) as ClientListResponse & { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? `Client list returned ${response.status}`);
+        }
+        if (!ignore) {
+          setClients(payload);
+        }
+      } catch {
+        if (!ignore) {
+          setClients(createLocalClients());
+        }
+      }
+    }
+
+    void loadClients();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   async function refreshAuditEvents() {
+    setLoadingAction("audit");
     try {
-      const nextAudit = await postJson<AuditEventsResponse>("/api/audit-events", {
-        tenant_id: tenant.id,
+      const nextAudit = await postJson<AuditEventsResponse>("/api/audit", {
+        client_id: clientId,
         limit: 8,
       });
       setAudit(nextAudit);
     } catch {
       setAudit((current) => current);
+    } finally {
+      setLoadingAction(null);
     }
   }
 
-  async function runForecast() {
+  async function runPrediction() {
     setError(null);
-    setLoadingAction("forecast");
-    setStatus("Forecast running");
+    setLoadingAction("predict");
+    setStatus("Calling predict_next_basket");
     try {
-      const nextRun = await postJson<ForecastRun>("/api/forecast", {
-        tenant_id: tenant.id,
-        sku,
-        customer_segment: segment,
-        horizon_weeks: horizon,
+      const result = await postJson<BasketPrediction>("/api/predict", {
+        client_id: clientId,
+        max_generate: maxGenerate,
+        top_k: topK,
+        temperature,
+        seed: 42,
       });
-      setRun(nextRun);
-      setBeams(createLocalBeams(nextRun));
-      setStatus(nextRun.forecast_run_id === "local_demo" ? "Local fallback" : "MCP service");
+      setPrediction(result);
+      setStatus(result.model_version === "swiftron-onnx-v1" ? "Prediction ready" : result.model_version);
       void refreshAuditEvents();
     } catch (caught) {
-      const fallback = createLocalForecast(sku, segment, horizon);
-      setRun(fallback);
-      setBeams(createLocalBeams(fallback));
+      setPrediction(createLocalBasketPrediction());
       setStatus("Local fallback");
-      setError(caught instanceof Error ? caught.message : "Forecast failed");
+      setError(caught instanceof Error ? caught.message : "Prediction failed");
     } finally {
       setLoadingAction(null);
     }
   }
 
-  async function loadRisk() {
-    setActivePanel("risk");
-    setPanelError(null);
-    setPanelMessage("Ranking customer downside risk");
-    setLoadingAction("risk");
+  async function runScenarios() {
+    setError(null);
+    setLoadingAction("scenarios");
+    setStatus("Calling predict_scenarios");
     try {
-      const nextRisk = await postJson<RiskResponse>("/api/risk", {
-        tenant_id: tenant.id,
-        sku,
-        horizon_weeks: horizon,
-        limit: 5,
+      const result = await postJson<ScenarioResponse>("/api/scenarios", {
+        client_id: clientId,
+        beam_width: beamWidth,
+        horizon,
+        temperature,
       });
-      setRisk(nextRisk);
-      setPanelMessage(`Ranked ${nextRisk.ranked_customers.length} customers for ${nextRisk.sku}`);
+      setScenarios(result);
+      setStatus(`${result.scenarios.length} scenarios ready`);
       void refreshAuditEvents();
     } catch (caught) {
-      setPanelError(caught instanceof Error ? caught.message : "Risk ranking failed");
+      setScenarios(createLocalScenarios());
+      setStatus("Local fallback");
+      setError(caught instanceof Error ? caught.message : "Scenario request failed");
     } finally {
       setLoadingAction(null);
     }
   }
 
-  async function loadModelVersions() {
-    setActivePanel("models");
+  async function runForecastPlan() {
+    setActivePanel("plan");
     setPanelError(null);
-    setPanelMessage("Loading model versions");
-    setLoadingAction("models");
+    setPanelMessage("Calling forecast_plan");
+    setLoadingAction("plan");
     try {
-      const nextModels = await postJson<ModelVersionsResponse>("/api/model-versions", {
-        tenant_id: tenant.id,
+      const result = await postJson<ForecastPlanResponse>("/api/forecast-plan", {
+        client_id: clientId,
+        intent,
       });
-      setModels(nextModels);
-      const activeCount = nextModels.model_versions.filter((model) => model.status === "active").length;
-      setPanelMessage(`${nextModels.model_versions.length} model versions loaded, ${activeCount} active`);
+      setPlan(result);
+      setPrediction(result.predicted_basket);
+      setScenarios({ client_id: result.client_id, model_version: result.predicted_basket.model_version, scenarios: result.scenarios });
+      setPanelMessage(`Strategy selected: ${result.selected_strategy}`);
+      setStatus("Plan ready");
       void refreshAuditEvents();
     } catch (caught) {
-      setPanelError(caught instanceof Error ? caught.message : "Model version request failed");
+      setPanelError(caught instanceof Error ? caught.message : "Forecast plan failed");
     } finally {
       setLoadingAction(null);
     }
   }
 
-  async function loadAnonymization() {
-    setActivePanel("anonymization");
+  async function runPersonalization() {
+    setActivePanel("personalize");
     setPanelError(null);
-    setPanelMessage("Generating anonymization report");
-    setLoadingAction("anonymization");
+    setPanelMessage("Calling personalize_client");
+    setLoadingAction("personalize");
     try {
-      const report = await postJson<AnonymizationResponse>("/api/anonymize", {
-        tenant_id: tenant.id,
-        sku,
-        customer_segment: segment,
-        sample_size: 8,
+      const result = await postJson<PersonalizationResponse>("/api/personalize", {
+        client_id: clientId,
+        additional_tokens: selectedSensorTokens,
       });
-      setAnonymization(report);
-      setPanelMessage(`Anonymized ${report.anonymization.sample_size} sample rows from ${report.anonymization.source_rows} orders`);
+      setPersonalization(result);
+      setPrediction(result.after);
+      setPanelMessage(`Session ${result.session_id} updated`);
+      setStatus("Sensor profile applied");
+      void refreshAuditEvents();
+    } catch (caught) {
+      setPanelError(caught instanceof Error ? caught.message : "Personalization failed");
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
+  async function runAnonymization() {
+    setActivePanel("anonymize");
+    setPanelError(null);
+    setPanelMessage("Calling anonymize_and_tokenize_orders");
+    setLoadingAction("anonymize");
+    try {
+      const result = await postJson<AnonymizationResponse>("/api/anonymize", {
+        client_id: clientId,
+        raw_rows: [],
+      });
+      setAnonymization(result);
+      setPanelMessage(`${result.audit_report.row_count} rows tokenized`);
+      setStatus("Token audit ready");
       void refreshAuditEvents();
     } catch (caught) {
       setPanelError(caught instanceof Error ? caught.message : "Anonymization failed");
@@ -305,341 +316,166 @@ export function Dashboard() {
     }
   }
 
-  async function runRetraining() {
-    setActivePanel("retraining");
-    setPanelError(null);
-    setPanelMessage("Queueing retraining job");
-    setLoadingAction("retraining");
-    setStatus("Retraining queued");
-    try {
-      const queued = await postJson<RetrainingJob>("/api/retraining", {
-        tenant_id: tenant.id,
-        reason: `Dashboard retraining for ${sku}`,
-      });
-      setRetraining(queued);
-      setPanelMessage(`Retraining job ${queued.job_id} is ${queued.status}`);
-
-      let latest = queued;
-      for (const pollCount of [1, 2]) {
-        await sleep(650);
-        latest = await postJson<RetrainingJob>("/api/retraining/status", {
-          tenant_id: tenant.id,
-          job_id: queued.job_id,
-          poll_count: pollCount,
-        });
-        setRetraining(latest);
-        setPanelMessage(`Retraining job ${latest.job_id} is ${latest.status}`);
-      }
-
-      if (latest.status === "completed") {
-        const nextRun = await postJson<ForecastRun>("/api/forecast", {
-          tenant_id: tenant.id,
-          sku,
-          customer_segment: segment,
-          horizon_weeks: horizon,
-        });
-        setRun(nextRun);
-        setBeams(createLocalBeams(nextRun));
-        setStatus(`Retraining complete: ${latest.model_version?.version_id ?? nextRun.model_version}`);
-        setPanelMessage("Retraining completed, model activated, and forecast refreshed");
-        try {
-          const nextModels = await postJson<ModelVersionsResponse>("/api/model-versions", {
-            tenant_id: tenant.id,
-          });
-          setModels(nextModels);
-          void refreshAuditEvents();
-        } catch {
-          setModels((current) => current);
-        }
-      }
-    } catch (caught) {
-      setPanelError(caught instanceof Error ? caught.message : "Retraining failed");
-      setStatus("Retraining failed");
-    } finally {
-      setLoadingAction(null);
-    }
-  }
-
-  async function runRealModel() {
-    setActivePanel("realModel");
-    setPanelError(null);
-    setPanelMessage("Calling mounted CTO ONNX sequence model");
-    setLoadingAction("realModel");
-    try {
-      const result = await postJson<RealSequenceResponse>("/api/real-sequence", {
-        client_id: "nexus_lab_solutions",
-        max_generate: 30,
-        temperature: 1,
-        top_k: 30,
-        seed: 0,
-      });
-      setRealSequence(result);
-      setPanelMessage(`Real model generated ${result.tokens.length} tokens for ${result.client_id}`);
-      setStatus("CTO ONNX model");
-    } catch (caught) {
-      setPanelError(caught instanceof Error ? caught.message : "Real model request failed");
-      setRealSequence(null);
-      setStatus("Real model unavailable");
-    } finally {
-      setLoadingAction(null);
-    }
+  function toggleSensorToken(token: string) {
+    setSelectedSensorTokens((current) =>
+      current.includes(token) ? current.filter((item) => item !== token) : [...current, token],
+    );
   }
 
   function renderActionPanel() {
-    if (activePanel === "realModel") {
+    if (activePanel === "personalize") {
       return (
         <div className="action-stack">
-          <button className="secondary-button" onClick={runRealModel} disabled={loadingAction === "realModel"}>
-            {loadingAction === "realModel" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}
-            Run CTO model
+          <div className="tag-list">
+            {sensorTokenOptions.map((token) => (
+              <button
+                className={selectedSensorTokens.includes(token) ? "tag-button is-active" : "tag-button"}
+                key={token}
+                onClick={() => toggleSensorToken(token)}
+                type="button"
+              >
+                {token}
+              </button>
+            ))}
+          </div>
+          <button className="secondary-button" onClick={runPersonalization} disabled={loadingAction === "personalize"}>
+            {loadingAction === "personalize" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <GitCompare size={16} aria-hidden="true" />}
+            Apply sensor profile
           </button>
-          {realSequence ? (
-            <>
-              <div className="audit-grid real-model-grid">
-                <div>
-                  <span>Client</span>
-                  <strong>{realSequence.client_id}</strong>
-                </div>
-                <div>
-                  <span>Temperature</span>
-                  <strong>{realSequence.temperature}</strong>
-                </div>
-                <div>
-                  <span>Top K</span>
-                  <strong>{realSequence.top_k}</strong>
-                </div>
-                <div>
-                  <span>Generated tokens</span>
-                  <strong>{realSequence.tokens.length}</strong>
-                </div>
-              </div>
-              <div className="sequence-block">
-                <h4>Start sequence</h4>
-                <p>{realSequence.start_sequence}</p>
-              </div>
-              <div className="sequence-block is-generated">
-                <h4>Generated sequence</h4>
-                <div className="token-list">
-                  {realSequence.tokens.map((token, index) => (
-                    <span key={`${token}-${index}`}>{token}</span>
-                  ))}
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="empty-state">Run the CTO model to call the mounted ONNX artifact bundle.</div>
-          )}
-          <p className="panel-copy">
-            This panel calls the mounted NDA bundle through the MCP service REST bridge. If it returns a service
-            error, restart the Docker container with REAL_MODEL_ARTIFACT_DIR pointing at the CTO folder.
-          </p>
-        </div>
-      );
-    }
-
-    if (activePanel === "models") {
-      return (
-        <div className="version-list">
-          {models.model_versions.map((model) => (
-            <div className="panel-row" key={model.version_id}>
-              <div>
-                <div className="row-title">
-                  <strong>{model.version_id}</strong>
-                  <span className={`status-chip ${model.status}`}>{model.status}</span>
-                </div>
-                <p>{model.model_name}</p>
-                {model.explanation ? <p>{model.explanation}</p> : null}
-              </div>
-              <div className="compact-metrics">
-                <span>MAE {model.metrics.mae}</span>
-                <span>SMAPE {model.metrics.smape}%</span>
-                {model.adapter_multiplier ? <span>Adapter {model.adapter_multiplier}</span> : null}
-              </div>
+          <div className="compare-grid">
+            <div>
+              <h4>Before</h4>
+              <TokenGroups tokens={personalization.before.generated_tokens} deltas={personalization.before.generated_times} />
             </div>
-          ))}
+            <div>
+              <h4>After</h4>
+              <TokenGroups tokens={personalization.after.generated_tokens} deltas={personalization.after.generated_times} />
+            </div>
+          </div>
+          <div className="event-list compact">
+            {personalization.delta_notes.map((note) => (
+              <div className="event-item" key={note}>
+                <p>{note}</p>
+              </div>
+            ))}
+          </div>
         </div>
       );
     }
 
-    if (activePanel === "anonymization") {
+    if (activePanel === "anonymize") {
       return (
         <div className="action-stack">
-          <button className="secondary-button" onClick={loadAnonymization} disabled={loadingAction === "anonymization"}>
-            {loadingAction === "anonymization" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />}
-            Generate report
+          <button className="secondary-button" onClick={runAnonymization} disabled={loadingAction === "anonymize"}>
+            {loadingAction === "anonymize" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />}
+            Run privacy audit
           </button>
-          {anonymization ? (
-            <>
-              <div className="audit-grid">
-                <div>
-                  <span>Source rows</span>
-                  <strong>{formatNumber(anonymization.anonymization.source_rows)}</strong>
-                </div>
-                <div>
-                  <span>Sample rows</span>
-                  <strong>{formatNumber(anonymization.anonymization.sample_size)}</strong>
-                </div>
-                <div>
-                  <span>K-anonymity proxy</span>
-                  <strong>{anonymization.anonymization.k_anonymity_proxy}</strong>
-                </div>
-                <div>
-                  <span>Sensitive fields</span>
-                  <strong>{anonymization.anonymization.detected_sensitive_fields.length}</strong>
-                </div>
-              </div>
-              <div className="audit-columns">
-                <div>
-                  <h4>Scrubbed</h4>
-                  <div className="tag-list">
-                    {anonymization.anonymization.fields_scrubbed.map((field) => (
-                      <span key={field}>{field}</span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <h4>Hashed</h4>
-                  <div className="tag-list">
-                    {anonymization.anonymization.fields_hashed.map((field) => (
-                      <span key={field}>{field}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
+          <div className="audit-grid">
+            <div>
+              <span>Rows</span>
+              <strong>{anonymization.audit_report.row_count}</strong>
+            </div>
+            <div>
+              <span>K-anonymity proxy</span>
+              <strong>{anonymization.audit_report.k_anonymity_proxy}</strong>
+            </div>
+            <div>
+              <span>Hashed fields</span>
+              <strong>{anonymization.audit_report.fields_hashed.length}</strong>
+            </div>
+            <div>
+              <span>Scrubbed fields</span>
+              <strong>{anonymization.audit_report.fields_scrubbed.length}</strong>
+            </div>
+          </div>
+          <div className="audit-columns">
+            <div>
+              <h4>Scrubbed</h4>
               <div className="tag-list">
-                {anonymization.anonymization.transformed_fields.map((field) => (
+                {anonymization.audit_report.fields_scrubbed.map((field) => (
                   <span key={field}>{field}</span>
                 ))}
               </div>
-              <div className="table-wrap">
-                <table className="compact-table">
-                  <thead>
-                    <tr>
-                      <th>Week</th>
-                      <th>Customer ref</th>
-                      <th>Segment</th>
-                      <th>Region</th>
-                      <th>Qty</th>
-                      <th>Price bucket</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {anonymization.anonymization.sample.slice(0, 6).map((row) => (
-                      <tr key={`${row.order_date}-${row.customer_ref}`}>
-                        <td>{row.order_date}</td>
-                        <td>{row.customer_ref}</td>
-                        <td>{row.customer_segment}</td>
-                        <td>{row.region}</td>
-                        <td>{formatNumber(row.quantity)}</td>
-                        <td>{row.unit_price_bucket}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            </div>
+            <div>
+              <h4>Hashed</h4>
+              <div className="tag-list">
+                {anonymization.audit_report.fields_hashed.map((field) => (
+                  <span key={field}>{field}</span>
+                ))}
               </div>
-            </>
-          ) : (
-            <div className="empty-state">Generate a report to inspect the anonymized export sample.</div>
-          )}
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table className="compact-table">
+              <thead>
+                <tr>
+                  <th>Row</th>
+                  <th>Source label</th>
+                  <th>Token</th>
+                  <th>Time delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {anonymization.rows.map((row) => (
+                  <tr key={row.row_id}>
+                    <td>{row.row_id}</td>
+                    <td>{row.source_label}</td>
+                    <td>{row.token}</td>
+                    <td>{formatDelta(row.time_delta)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       );
     }
 
-    if (activePanel === "retraining") {
+    if (activePanel === "audit") {
       return (
         <div className="action-stack">
-          <button className="secondary-button" onClick={runRetraining} disabled={loadingAction === "retraining"}>
-            {loadingAction === "retraining" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <RefreshCcw size={16} aria-hidden="true" />}
-            Trigger retraining
+          <button className="secondary-button" onClick={refreshAuditEvents} disabled={loadingAction === "audit"}>
+            <Activity size={16} aria-hidden="true" />
+            Refresh audit
           </button>
-          {retraining ? (
-            <>
-              <div className="progress-wrap">
-                <div className="progress-meta">
-                  <strong>{retraining.status}</strong>
-                  <span>{retraining.progress_pct}%</span>
-                </div>
-                <div className="progress-track">
-                  <span style={{ width: `${retraining.progress_pct}%` }} />
-                </div>
+          <div className="audit-event-list">
+            {audit.events.map((event) => (
+              <div className="audit-event" key={event.event_id}>
+                <strong>{event.tool_name}</strong>
+                <span>{event.status} by {event.actor}</span>
+                <span>{event.latency_ms}ms</span>
               </div>
-              <LossCurve job={retraining} />
-              <div className="audit-grid">
-                <div>
-                  <span>Before MAE</span>
-                  <strong>{retraining.before_metrics.mae}</strong>
-                </div>
-                <div>
-                  <span>After MAE</span>
-                  <strong>{retraining.after_metrics.mae}</strong>
-                </div>
-                <div>
-                  <span>Before SMAPE</span>
-                  <strong>{retraining.before_metrics.smape}%</strong>
-                </div>
-                <div>
-                  <span>After SMAPE</span>
-                  <strong>{retraining.after_metrics.smape}%</strong>
-                </div>
-              </div>
-              <p className="panel-copy">{retraining.explanation}</p>
-            </>
-          ) : (
-            <LossCurve job={null} />
-          )}
+            ))}
+          </div>
         </div>
       );
     }
 
     return (
       <div className="action-stack">
-        <button className="secondary-button" onClick={loadRisk} disabled={loadingAction === "risk"}>
-          {loadingAction === "risk" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <AlertTriangle size={16} aria-hidden="true" />}
-          Rank risk
+        <div className="control inline-control">
+          <label htmlFor="intent">Intent</label>
+          <select id="intent" value={intent} onChange={(event) => setIntent(event.target.value)}>
+            {intentOptions.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button className="secondary-button" onClick={runForecastPlan} disabled={loadingAction === "plan"}>
+          {loadingAction === "plan" ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <SlidersHorizontal size={16} aria-hidden="true" />}
+          Ask forecast planner
         </button>
-        <div className="table-wrap">
-          <table className="risk-table">
-            <thead>
-              <tr>
-                <th>Rank</th>
-                <th>Customer</th>
-                <th>Segment</th>
-                <th>Region</th>
-                <th>Current demand</th>
-                <th>Forecast demand</th>
-                <th>Downside scenario</th>
-                <th>Risk</th>
-                <th>Recommended action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {risk.ranked_customers.map((customer) => (
-                <tr key={customer.customer_ref}>
-                  <td>{customer.rank}</td>
-                  <td>{customer.customer_ref}</td>
-                  <td>{customer.segment}</td>
-                  <td>{customer.region}</td>
-                  <td>
-                    {formatNumber(customer.current_demand.last_4_weeks_units)} units
-                    <span>{formatPercent(customer.current_demand.trend_vs_prior_4_weeks_pct)} trend</span>
-                  </td>
-                  <td>
-                    {formatNumber(customer.forecast_demand.horizon_units)} units
-                    <span>{formatNumber(Math.round(customer.forecast_demand.weekly_average))}/wk</span>
-                  </td>
-                  <td>
-                    {customer.downside_scenario.label}
-                    <span>{formatNumber(customer.downside_scenario.horizon_units)} units</span>
-                  </td>
-                  <td>
-                    <strong className="risk-score">{Math.round(customer.risk_score)}</strong>
-                    <span>{formatMoney(customer.revenue_at_risk)}</span>
-                  </td>
-                  <td>{customer.recommended_action}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="plan-summary">
+          <span>{plan.selected_strategy}</span>
+          <p>{plan.recommendation_summary}</p>
+        </div>
+        <div className="scenario-grid">
+          {plan.scenarios.slice(0, 3).map((scenario) => (
+            <ScenarioCard key={scenario.rank} scenario={scenario} />
+          ))}
         </div>
       </div>
     );
@@ -653,63 +489,99 @@ export function Dashboard() {
             <Network size={21} aria-hidden="true" />
           </div>
           <div>
-            <h1>SwiftForecast MCP</h1>
-            <p>{tenant.name}</p>
+            <h1>Swiftron MCP</h1>
+            <p>{demoClient.display_name}</p>
           </div>
         </div>
 
         <div className="control">
-          <label htmlFor="sku">SKU</label>
-          <select id="sku" value={sku} onChange={(event) => setSku(event.target.value)}>
-            {products.map((product) => (
-              <option key={product.sku} value={product.sku}>
-                {product.sku} - {product.name}
+          <label htmlFor="client">Client</label>
+          <select id="client" value={clientId} disabled>
+            {clients.clients.map((client) => (
+              <option key={client.client_id} value={client.client_id}>
+                {client.client_id}
               </option>
             ))}
           </select>
         </div>
 
-        <div className="control">
-          <label htmlFor="segment">Segment</label>
-          <select id="segment" value={segment} onChange={(event) => setSegment(event.target.value)}>
-            {segments.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
+        <div className="control-grid">
+          <div className="control">
+            <label htmlFor="max-generate">Tokens</label>
+            <input
+              id="max-generate"
+              type="number"
+              min="1"
+              max="80"
+              value={maxGenerate}
+              onChange={(event) => setMaxGenerate(Number(event.target.value))}
+            />
+          </div>
+          <div className="control">
+            <label htmlFor="top-k">Top K</label>
+            <input
+              id="top-k"
+              type="number"
+              min="1"
+              max="100"
+              value={topK}
+              onChange={(event) => setTopK(Number(event.target.value))}
+            />
+          </div>
         </div>
 
         <div className="control">
-          <label htmlFor="horizon">Weeks</label>
+          <label htmlFor="temperature">Temperature: {temperature.toFixed(1)}</label>
           <input
-            id="horizon"
-            type="number"
-            min="1"
-            max="52"
-            value={horizon}
-            onChange={(event) => setHorizon(Number(event.target.value))}
+            id="temperature"
+            type="range"
+            min="0.1"
+            max="2"
+            step="0.1"
+            value={temperature}
+            onChange={(event) => setTemperature(Number(event.target.value))}
           />
         </div>
 
-        <button className="run-button" onClick={runForecast} disabled={loadingAction === "forecast"}>
-          {loadingAction === "forecast" ? <Loader2 className="spin" size={17} aria-hidden="true" /> : <Play size={17} aria-hidden="true" />}
-          Run forecast
+        <div className="control-grid">
+          <div className="control">
+            <label htmlFor="beam-width">Beams</label>
+            <input
+              id="beam-width"
+              type="number"
+              min="1"
+              max="8"
+              value={beamWidth}
+              onChange={(event) => setBeamWidth(Number(event.target.value))}
+            />
+          </div>
+          <div className="control">
+            <label htmlFor="horizon">Horizon</label>
+            <input
+              id="horizon"
+              type="number"
+              min="1"
+              max="32"
+              value={horizon}
+              onChange={(event) => setHorizon(Number(event.target.value))}
+            />
+          </div>
+        </div>
+
+        <button className="run-button" onClick={runPrediction} disabled={loadingAction === "predict"}>
+          {loadingAction === "predict" ? <Loader2 className="spin" size={17} aria-hidden="true" /> : <Play size={17} aria-hidden="true" />}
+          Predict basket
         </button>
 
         <div className="icon-row" aria-label="MCP controls">
-          <button className="icon-button" title="Model versions" onClick={loadModelVersions} disabled={loadingAction === "models"}>
-            {loadingAction === "models" ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <Box size={18} aria-hidden="true" />}
+          <button className="icon-button" title="Scenarios" onClick={runScenarios} disabled={loadingAction === "scenarios"}>
+            {loadingAction === "scenarios" ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <ScanSearch size={18} aria-hidden="true" />}
           </button>
-          <button className="icon-button" title="Anonymization" onClick={loadAnonymization} disabled={loadingAction === "anonymization"}>
-            {loadingAction === "anonymization" ? (
-              <Loader2 className="spin" size={18} aria-hidden="true" />
-            ) : (
-              <ShieldCheck size={18} aria-hidden="true" />
-            )}
+          <button className="icon-button" title="Personalize" onClick={runPersonalization} disabled={loadingAction === "personalize"}>
+            {loadingAction === "personalize" ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <Fingerprint size={18} aria-hidden="true" />}
           </button>
-          <button className="icon-button" title="Retraining" onClick={runRetraining} disabled={loadingAction === "retraining"}>
-            {loadingAction === "retraining" ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <RefreshCcw size={18} aria-hidden="true" />}
+          <button className="icon-button" title="Privacy audit" onClick={runAnonymization} disabled={loadingAction === "anonymize"}>
+            {loadingAction === "anonymize" ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <ShieldCheck size={18} aria-hidden="true" />}
           </button>
         </div>
       </aside>
@@ -717,9 +589,9 @@ export function Dashboard() {
       <section className="main">
         <div className="topbar">
           <div>
-            <h2>B2B Demand Control Plane</h2>
+            <h2>NexusLab procurement forecast</h2>
             <p>
-              Forecast run {run.forecast_run_id} is using {run.model_version} for {run.sku} across {run.horizon_weeks} weeks.
+              Predict the next order basket, compare ranked futures, and verify privacy handling before raw order rows become model tokens.
             </p>
           </div>
           <div className="status">
@@ -730,54 +602,69 @@ export function Dashboard() {
 
         {error ? <div className="card metric error">{error}</div> : null}
 
-        <section className="metrics" aria-label="Forecast metrics">
+        <section className="metrics" aria-label="Prediction summary">
           <div className="card metric">
-            <span>Forecast units</span>
-            <strong>{formatNumber(totalUnits)}</strong>
+            <span>Client</span>
+            <strong>{activeClient.display_name}</strong>
           </div>
           <div className="card metric">
-            <span>Projected revenue</span>
-            <strong>{formatMoney(revenue)}</strong>
+            <span>Generated products</span>
+            <strong>{generatedProductCount}</strong>
           </div>
           <div className="card metric">
-            <span>SMAPE</span>
-            <strong>{run.metrics.smape}%</strong>
+            <span>Best scenario</span>
+            <strong>{bestScenario ? `#${bestScenario.rank}` : "none"}</strong>
           </div>
           <div className="card metric">
-            <span>Active model</span>
-            <strong>{activeModel?.version_id ?? run.model_version}</strong>
+            <span>Model</span>
+            <strong>{prediction.model_version}</strong>
           </div>
         </section>
 
         <section className="grid">
           <div className="card">
             <div className="panel-header">
-              <h3>Autoregressive forecast</h3>
+              <h3>Client directory</h3>
               <span className="pill">
-                <Sparkles size={14} aria-hidden="true" />
-                greedy decode
+                <Database size={14} aria-hidden="true" />
+                list_clients
               </span>
             </div>
-            <ForecastChart run={run} />
+            <div className="event-list">
+              {clients.clients.map((client) => (
+                <div className="event-item" key={client.client_id}>
+                  <div className="row-title">
+                    <h4>{client.display_name}</h4>
+                    <span className={`status-chip ${client.status}`}>{client.status}</span>
+                  </div>
+                  <p>{client.client_id}</p>
+                  <p>{client.domain}, last order week {client.last_order_week}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="card">
             <div className="panel-header">
-              <h3>Beam scenarios</h3>
+              <h3>Tool coverage</h3>
               <span className="pill">
-                <Activity size={14} aria-hidden="true" />
-                top {beams.length}
+                <CheckCircle2 size={14} aria-hidden="true" />
+                locked surface
               </span>
             </div>
-            <div className="beam-list">
-              {beams.map((beam) => (
-                <div className="beam-item" key={beam.rank}>
-                  <div className="rank">{beam.rank}</div>
-                  <div>
-                    <h4>{beam.label}</h4>
-                    <p>{formatNumber(beam.total_units)} units</p>
-                  </div>
-                  <span className="probability">{Math.round(beam.probability * 100)}%</span>
+            <div className="tool-grid">
+              {[
+                "predict_next_basket",
+                "predict_scenarios",
+                "forecast_plan",
+                "personalize_client",
+                "anonymize_and_tokenize_orders",
+                "list_clients",
+                "list_audit_events",
+              ].map((tool) => (
+                <div className="tool-chip" key={tool}>
+                  <CheckCircle2 size={14} aria-hidden="true" />
+                  <span>{tool}</span>
                 </div>
               ))}
             </div>
@@ -787,74 +674,76 @@ export function Dashboard() {
         <section className="grid">
           <div className="card">
             <div className="panel-header">
-              <h3>Forecast table</h3>
+              <h3>Basket sequence</h3>
               <span className="pill">
                 <Database size={14} aria-hidden="true" />
-                tenant RLS
+                predict_next_basket
               </span>
             </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Week</th>
-                    <th>Forecast</th>
-                    <th>Lower</th>
-                    <th>Upper</th>
-                    <th>Confidence</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {run.forecast.slice(0, 8).map((point) => (
-                    <tr key={point.week}>
-                      <td>{point.week}</td>
-                      <td>{formatNumber(point.predicted_quantity)}</td>
-                      <td>{formatNumber(point.lower_bound)}</td>
-                      <td>{formatNumber(point.upper_bound)}</td>
-                      <td>{Math.round(point.confidence * 100)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="sequence-panel">
+              <h4>Start sequence</h4>
+              <TokenGroups tokens={prediction.start_sequence} deltas={prediction.start_sequence.map(() => 0)} />
+              <h4>Generated basket</h4>
+              <TokenGroups tokens={prediction.generated_tokens} deltas={prediction.generated_times} />
             </div>
           </div>
 
           <div className="card">
             <div className="panel-header">
-              <h3>Distribution</h3>
+              <h3>Decoder settings</h3>
               <span className="pill">
-                <KeyRound size={14} aria-hidden="true" />
-                API-key scoped
+                <SlidersHorizontal size={14} aria-hidden="true" />
+                {prediction.decoder_config.strategy}
               </span>
             </div>
             <div className="event-list">
-              <div className="event-item">
-                <h4>MCP endpoint</h4>
-                <p>{process.env.NEXT_PUBLIC_MCP_HTTP_URL ?? "http://localhost:8000/mcp"}</p>
-              </div>
-              <div className="event-item">
-                <h4>Tenant API key</h4>
-                <p>sk_northstar_forecast_full with forecast, anonymize, retrain, models, audit scopes</p>
-              </div>
-              <div className="event-item">
-                <h4>Next tool call</h4>
-                <p>erp_rank_at_risk_customers for {run.sku}</p>
-              </div>
-              <div className="event-item audit-log">
-                <div className="row-title">
-                  <h4>Recent tool calls</h4>
-                  <button className="text-button" onClick={refreshAuditEvents}>Refresh</button>
+              {Object.entries(prediction.decoder_config).map(([key, value]) => (
+                <div className="event-item" key={key}>
+                  <h4>{key}</h4>
+                  <p>{String(value)}</p>
                 </div>
-                <div className="audit-event-list">
-                  {audit.events.slice(0, 5).map((event) => (
-                    <div className="audit-event" key={event.event_id}>
-                      <strong>{event.tool_name.replace("erp_", "")}</strong>
-                      <span>{event.status} by {event.actor}</span>
-                      <span>{event.latency_ms}ms</span>
-                    </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid">
+          <div className="card wide-card">
+            <div className="panel-header">
+              <h3>Scenario comparison</h3>
+              <span className="pill">
+                <Activity size={14} aria-hidden="true" />
+                {beamWidth} beams
+              </span>
+            </div>
+            <div className="scenario-grid">
+              {scenarios.scenarios.slice(0, 3).map((scenario) => (
+                <ScenarioCard key={scenario.rank} scenario={scenario} />
+              ))}
+            </div>
+            <div className="table-wrap scenario-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Joint log-prob</th>
+                    <th>First token</th>
+                    <th>Time delta</th>
+                    <th>Token count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenarios.scenarios.map((scenario) => (
+                    <tr key={scenario.rank}>
+                      <td>{scenario.rank}</td>
+                      <td>{formatLogProb(scenario.joint_log_prob)}</td>
+                      <td>{scenario.tokens[0] ?? "none"}</td>
+                      <td>{formatDelta(scenario.time_deltas[0] ?? 0)}</td>
+                      <td>{scenario.tokens.length}</td>
+                    </tr>
                   ))}
-                </div>
-              </div>
+                </tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -865,57 +754,49 @@ export function Dashboard() {
               <div>
                 <h3>Dashboard actions</h3>
                 <p>
-                  {activePanel === "risk"
-                    ? "At-risk customers"
-                    : activePanel === "models"
-                      ? "Model versions"
-                      : activePanel === "anonymization"
-                        ? "Anonymization report"
-                        : activePanel === "retraining"
-                          ? "Retraining"
-                          : "CTO ONNX model"}
+                  {activePanel === "plan"
+                    ? "Forecast planner"
+                    : activePanel === "personalize"
+                      ? "Sensor profile"
+                      : activePanel === "anonymize"
+                        ? "Privacy and token mapping"
+                        : "Tool audit"}
                 </p>
               </div>
               <div className="panel-actions" aria-label="Dashboard actions">
                 <button
-                  className={activePanel === "risk" ? "secondary-button is-active" : "secondary-button"}
-                  onClick={loadRisk}
-                  disabled={loadingAction === "risk"}
+                  className={activePanel === "plan" ? "secondary-button is-active" : "secondary-button"}
+                  onClick={runForecastPlan}
+                  disabled={loadingAction === "plan"}
                 >
-                  <AlertTriangle size={16} aria-hidden="true" />
-                  Risk
+                  <SlidersHorizontal size={16} aria-hidden="true" />
+                  Plan
                 </button>
                 <button
-                  className={activePanel === "models" ? "secondary-button is-active" : "secondary-button"}
-                  onClick={loadModelVersions}
-                  disabled={loadingAction === "models"}
+                  className={activePanel === "personalize" ? "secondary-button is-active" : "secondary-button"}
+                  onClick={runPersonalization}
+                  disabled={loadingAction === "personalize"}
                 >
-                  <Box size={16} aria-hidden="true" />
-                  Models
+                  <Fingerprint size={16} aria-hidden="true" />
+                  Personalize
                 </button>
                 <button
-                  className={activePanel === "anonymization" ? "secondary-button is-active" : "secondary-button"}
-                  onClick={loadAnonymization}
-                  disabled={loadingAction === "anonymization"}
+                  className={activePanel === "anonymize" ? "secondary-button is-active" : "secondary-button"}
+                  onClick={runAnonymization}
+                  disabled={loadingAction === "anonymize"}
                 >
                   <ShieldCheck size={16} aria-hidden="true" />
                   Privacy
                 </button>
                 <button
-                  className={activePanel === "retraining" ? "secondary-button is-active" : "secondary-button"}
-                  onClick={runRetraining}
-                  disabled={loadingAction === "retraining"}
+                  className={activePanel === "audit" ? "secondary-button is-active" : "secondary-button"}
+                  onClick={() => {
+                    setActivePanel("audit");
+                    void refreshAuditEvents();
+                  }}
                 >
-                  <RefreshCcw size={16} aria-hidden="true" />
-                  Retrain
-                </button>
-                <button
-                  className={activePanel === "realModel" ? "secondary-button is-active" : "secondary-button"}
-                  onClick={runRealModel}
-                  disabled={loadingAction === "realModel"}
-                >
-                  <Sparkles size={16} aria-hidden="true" />
-                  CTO model
+                  <Activity size={16} aria-hidden="true" />
+                  Audit
                 </button>
               </div>
             </div>
