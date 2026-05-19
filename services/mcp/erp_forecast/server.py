@@ -52,6 +52,40 @@ def _model_version() -> str:
         return "swiftron-onnx-v1"
 
 
+@mcp.tool()
+def predict_next_basket(
+    client_id: str = DEMO_TENANT_ID,
+    start_sequence: list[str] | None = None,
+    max_generate: int = 32,
+    top_k: int = 5,
+    temperature: float = 1.0,
+    seed: int | None = None,
+    api_token: str | None = None,
+) -> dict[str, Any]:
+    """Top-k autoregressive prediction. Returns ordered tokens with time deltas."""
+    with _AuditContext(
+        STORE,
+        "predict_next_basket",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["predict_next_basket"],
+        api_token,
+    ):
+        try:
+            real_model = _load_real_model()
+            result = real_model.get_default_model().predict_basket(
+                client_id=client_id,
+                start_sequence=start_sequence,
+                max_generate=max_generate,
+                top_k=top_k,
+                temperature=temperature,
+                seed=seed,
+            )
+        except Exception as exc:
+            raise ValueError(f"predict_next_basket failed: {exc}") from exc
+        STORE.record_latest_prediction("predict_next_basket", result)
+        return result
+
+
 async def healthz(_request: Request) -> JSONResponse:
     """Plain liveness probe for Docker and Vercel."""
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
@@ -69,6 +103,24 @@ async def _read_body(request: Request) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise ValueError("Request body must be a JSON object.")
     return body
+
+
+async def rest_predict(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request)
+        return JSONResponse(
+            predict_next_basket(
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                start_sequence=body.get("start_sequence"),
+                max_generate=int(body.get("max_generate", 32)),
+                top_k=int(body.get("top_k", 5)),
+                temperature=float(body.get("temperature", 1.0)),
+                seed=body.get("seed"),
+                api_token=body.get("api_token"),
+            )
+        )
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
 
 
 class BearerAuthMiddleware:
@@ -101,6 +153,7 @@ def create_app() -> Starlette:
         lifespan=lifespan,
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
+            Route("/api/predict", rest_predict, methods=["POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
     )
