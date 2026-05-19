@@ -332,6 +332,89 @@ def list_audit_events(limit: int = 100, api_token: str | None = None) -> dict[st
         }
 
 
+@mcp.resource("swift://model-card")
+def model_card_resource() -> str:
+    """Honest one-pager for the Swiftron ONNX model. No marketing language."""
+    return (
+        "Swiftron landing_page_model.onnx (model_version: swiftron-onnx-v1).\n"
+        "\n"
+        "Architecture: transformer with a sensor mechanism that conditions the\n"
+        "decoder on a fixed-size profile of vocabulary vectors. Inputs are a\n"
+        "padded sentence sequence, a catalog tensor, and the sensor block.\n"
+        "Outputs include a per-step time-token distribution, a product query\n"
+        "embedding, and a learned candidate transform.\n"
+        "\n"
+        "Decoding strategies exposed: top-k autoregressive sampling with\n"
+        "product uniqueness, and beam search over the same decoder with joint\n"
+        "log-probability ranking. The model's weights and dataset come from\n"
+        "Swiftron under NDA and are not modified by this server.\n"
+        "\n"
+        "Inputs accepted by the wrapper: client_id, optional start_sequence\n"
+        "(token list), decoder controls (max_generate, top_k, temperature,\n"
+        "beam_width, horizon), optional sensor tokens for personalization.\n"
+    )
+
+
+@mcp.resource("swift://dataset-card")
+def dataset_card_resource() -> str:
+    """Honest one-pager for multi_client_dataset.joblib."""
+    return (
+        "Swiftron multi_client_dataset.joblib: 169 anonymized client datasets,\n"
+        "each loaded through the protected SimulationDataset class.\n"
+        "\n"
+        "Each dataset exposes word_to_int and vocab arrays plus a master_w2v\n"
+        "object with a time_order list. Vocabulary mixes product tokens with\n"
+        "time-delta tokens prefixed `<dt_*>` (for example day, week, month,\n"
+        "year buckets) and a small set of control tokens such as `<eos>` and\n"
+        "`<unk>`. Product tokens use anonymized prefixes that group items by\n"
+        "category; the actual product names are not in the public surface.\n"
+        "\n"
+        "Sentence samples per client drive both the start-sequence fallback\n"
+        "and the sensor profile. The dataset is read-only at runtime.\n"
+    )
+
+
+@mcp.resource("swift://prediction/latest")
+def latest_prediction_resource() -> str:
+    """Most recent prediction tool payload, JSON-encoded."""
+    import json
+
+    snapshot = STORE.get_latest_prediction()
+    if snapshot is None:
+        return json.dumps({"status": "empty", "note": "no predictions yet"})
+    return json.dumps(snapshot, default=str)
+
+
+@mcp.prompt()
+def procurement_planning_review(
+    client_id: str = DEMO_TENANT_ID,
+    focus: str = "next basket and one alternative",
+) -> str:
+    """Guide an agent through a procurement planning review for one client."""
+    return (
+        f"You are reviewing procurement plans for client {client_id}. Focus: {focus}.\n"
+        "\n"
+        "Step 1. Read resource swift://model-card to confirm which model and decoder\n"
+        "strategies are available.\n"
+        "\n"
+        "Step 2. Call predict_scenarios with beam_width=4 and a horizon between 12 and\n"
+        "20. Compare the ranked trajectories. Note where joint log-prob clusters and\n"
+        "where it spreads, since spread is the buying signal.\n"
+        "\n"
+        "Step 3. If the user mentions a change in the client's workload (a new project,\n"
+        "a different reagent, a swapped instrument), call personalize_client with the\n"
+        "matching additional_tokens and predict again. Diff the personalized basket\n"
+        "against the baseline.\n"
+        "\n"
+        "Step 4. If the user uploads an order CSV, call anonymize_and_tokenize_orders\n"
+        "with the parsed rows. Quote only the audit_report counts and the tokenized\n"
+        "list in the answer; never quote raw rows.\n"
+        "\n"
+        "Step 5. Recommend a short basket and call out the weeks with the widest\n"
+        "uncertainty. Keep the language for procurement managers, not engineers."
+    )
+
+
 async def healthz(_request: Request) -> JSONResponse:
     """Plain liveness probe for Docker and Vercel."""
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
