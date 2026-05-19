@@ -1,6 +1,15 @@
+"""SwiftForecast MCP server: dual FastMCP + Starlette REST surface.
+
+Tools, resources, and prompts described in AGENTS.md are registered onto the
+`mcp` instance below. Each tool wraps a Lane C implementation
+(real_model, sensor, tokenize_orders) inside an `_AuditContext` so latency and
+identity land in the audit log.
+"""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from importlib import import_module
 from os import getenv
 from typing import Any
 
@@ -11,95 +20,60 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
 
+from .audit import _AuditContext
 from .auth import AuthorizationError, validate_bearer_token
-from .real_model import RealSequenceModel
+from .store import STORE
+from .tool_schemas import DEMO_TENANT_ID, SCOPE_FOR_TOOL
 
 
 mcp = FastMCP("SwiftForecast ERP", stateless_http=True, json_response=True)
-_REAL_MODEL: RealSequenceModel | None = None
 
 
-def get_real_model() -> RealSequenceModel:
-    global _REAL_MODEL
-    artifact_dir = getenv("REAL_MODEL_ARTIFACT_DIR")
-    if not artifact_dir:
-        raise ValueError(
-            "REAL_MODEL_ARTIFACT_DIR is not set. Mount the NDA bundle containing "
-            "landing_page_model.onnx, multi_client_dataset.joblib, alit_backend.py, "
-            "and pyarmor_runtime_000000."
-        )
-    if _REAL_MODEL is None:
-        _REAL_MODEL = RealSequenceModel(artifact_dir)
-    return _REAL_MODEL
+def _load_real_model() -> Any:
+    """Lazy-import Lane C's real_model so server boots without it."""
+    return import_module("erp_forecast.real_model")
 
 
-@mcp.tool()
-def erp_real_sequence_forecast(
-    client_id: str = "nexus_lab_solutions",
-    start_sequence: str | None = None,
-    max_generate: int = 30,
-    temperature: float = 1.0,
-    top_k: int = 30,
-    seed: int = 42,
-    api_token: str | None = None,
-) -> dict[str, Any]:
-    """Run the NDA-provided ONNX sequence model through its public adapter.
-
-    This tool is available when REAL_MODEL_ARTIFACT_DIR points at the CTO bundle.
-    It treats alit_backend as protected IP and only uses the public
-    SimulationDataset interface shown in the notebook.
-    """
-    if api_token:
-        validate_bearer_token(api_token)
-    return get_real_model().predict(
-        client_id=client_id,
-        start_sequence=start_sequence,
-        max_generate=max_generate,
-        temperature=temperature,
-        top_k=top_k,
-        seed=seed,
-    ).to_dict()
+def _load_sensor() -> Any:
+    """Lazy-import Lane C's sensor module."""
+    return import_module("erp_forecast.sensor")
 
 
-@mcp.prompt()
-def demand_planning_review(tenant_id: str, sku: str, customer_segment: str = "all") -> str:
-    """Guide an agent through demand planning review with forecast and scenario tools."""
-    return (
-        f"Review demand risk for tenant {tenant_id}, SKU {sku}, segment {customer_segment}. "
-        "Start with erp_adaptive_forecast_plan and describe the business objective so "
-        "the MCP server can choose greedy decoding, beam search, temperature, and horizon. "
-        "If the user asks for fixed scenarios, call erp_beam_search_forecast with explicit "
-        "beam_width and temperature. Compare the base path with alternatives, identify "
-        "weeks with the widest uncertainty, and recommend procurement or customer-success "
-        "actions. If sharing history externally, call erp_anonymize_orders before quoting "
-        "row-level examples."
-    )
+def _load_tokenize_orders() -> Any:
+    """Lazy-import Lane C's tokenize_orders module."""
+    return import_module("erp_forecast.tokenize_orders")
+
+
+def _model_version() -> str:
+    """Pull MODEL_VERSION constant from real_model, or fall back to default."""
+    try:
+        return str(_load_real_model().MODEL_VERSION)
+    except Exception:
+        return "swiftron-onnx-v1"
 
 
 async def healthz(_request: Request) -> JSONResponse:
+    """Plain liveness probe for Docker and Vercel."""
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
 
 
-async def rest_real_sequence(request: Request) -> JSONResponse:
-    body = await request.json()
+def _err(exc: Exception, status: int = 400) -> JSONResponse:
+    return JSONResponse({"error": str(exc)}, status_code=status)
+
+
+async def _read_body(request: Request) -> dict[str, Any]:
     try:
-        api_token = body.get("api_token")
-        if api_token:
-            validate_bearer_token(api_token)
-        result = get_real_model().predict(
-            client_id=body.get("client_id", "nexus_lab_solutions"),
-            start_sequence=body.get("start_sequence"),
-            max_generate=int(body.get("max_generate", 30)),
-            temperature=float(body.get("temperature", 1.0)),
-            top_k=int(body.get("top_k", 30)),
-            seed=int(body.get("seed", 42)),
-        ).to_dict()
-    except (KeyError, ValueError, ImportError, RuntimeError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return JSONResponse(result)
+        body = await request.json()
+    except ValueError as exc:
+        raise ValueError(f"Invalid JSON body: {exc}") from exc
+    if not isinstance(body, dict):
+        raise ValueError("Request body must be a JSON object.")
+    return body
 
 
 class BearerAuthMiddleware:
+    """Reject /mcp requests that fail bearer-token validation."""
+
     def __init__(self, app: Any) -> None:
         self.app = app
 
@@ -127,9 +101,8 @@ def create_app() -> Starlette:
         lifespan=lifespan,
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
-            Route("/api/real-sequence", rest_real_sequence, methods=["POST"]),
             Mount("/", app=mcp.streamable_http_app()),
-        ]
+        ],
     )
     app.add_middleware(
         CORSMiddleware,
