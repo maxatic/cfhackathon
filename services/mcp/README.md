@@ -14,11 +14,9 @@ uvicorn erp_forecast.server:app --reload --port 8000
 
 The Docker image uses Python 3.11 because the reference notebook requested Python 3.11.x.
 
-Seeded bearer tokens:
+Seeded bearer token:
 
-- `demo_northstar_full`
-- `demo_northstar_read`
-- `demo_apex_full`
+- `demo_nexus_lab_full` (alias for `sk_nexus_lab_forecast_full`)
 
 The MCP endpoint is `http://localhost:8000/mcp`.
 
@@ -46,55 +44,6 @@ The folder must contain:
 curl http://localhost:8000/healthz
 ```
 
-## MCP Tool Call Shape
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": "forecast-1",
-  "method": "tools/call",
-  "params": {
-    "name": "erp_forecast_orders",
-    "arguments": {
-      "tenant_id": "tenant_northstar",
-      "sku": "NSI-VAL-100",
-      "customer_segment": "all",
-      "horizon_weeks": 12,
-      "api_token": "demo_northstar_full"
-    }
-  }
-}
-```
-
-## Adaptive Challenge Tool
-
-Use this as the main MCP entry point for the hackathon challenge:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": "adaptive-1",
-  "method": "tools/call",
-  "params": {
-    "name": "erp_adaptive_forecast_plan",
-    "arguments": {
-      "tenant_id": "tenant_northstar",
-      "sku": "NSI-VAL-100",
-      "objective": "I visit this customer next week. What three products should I prepare for?",
-      "recommendation_count": 3,
-      "api_token": "demo_northstar_full"
-    }
-  }
-}
-```
-
-The response includes the selected decoder plan. Examples:
-
-- `strategy=greedy`, `horizon_weeks=1` for the single most likely next order.
-- `strategy=beam_search`, `beam_width=4`, `temperature=1.0` for ranked demand scenarios.
-- Lower `temperature` for conservative inventory planning.
-- Higher `temperature` for substitute or alternative-product exploration.
-
 ## Real Sequence Forecast Call
 
 ```json
@@ -110,7 +59,7 @@ The response includes the selected decoder plan. Examples:
       "temperature": 1.0,
       "top_k": 30,
       "seed": 0,
-      "api_token": "demo_northstar_full"
+      "api_token": "demo_nexus_lab_full"
     }
   }
 }

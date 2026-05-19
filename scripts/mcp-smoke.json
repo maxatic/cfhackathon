@@ -1,15 +1,16 @@
 {
   "jsonrpc": "2.0",
-  "id": "forecast-1",
+  "id": "real-sequence-1",
   "method": "tools/call",
   "params": {
-    "name": "erp_forecast_orders",
+    "name": "erp_real_sequence_forecast",
     "arguments": {
-      "tenant_id": "tenant_northstar",
-      "sku": "NSI-VAL-100",
-      "customer_segment": "all",
-      "horizon_weeks": 12,
-      "api_token": "demo_northstar_full"
+      "client_id": "nexus_lab_solutions",
+      "max_generate": 30,
+      "temperature": 1.0,
+      "top_k": 30,
+      "seed": 0,
+      "api_token": "demo_nexus_lab_full"
     }
   }
 }
