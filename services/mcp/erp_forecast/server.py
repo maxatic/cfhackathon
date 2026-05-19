@@ -86,6 +86,49 @@ def predict_next_basket(
         return result
 
 
+@mcp.tool()
+def predict_scenarios(
+    client_id: str = DEMO_TENANT_ID,
+    start_sequence: list[str] | None = None,
+    beam_width: int = 4,
+    horizon: int = 16,
+    temperature: float = 1.0,
+    api_token: str | None = None,
+) -> dict[str, Any]:
+    """Beam search over the decoder. Returns ranked trajectories with joint log-prob."""
+    with _AuditContext(
+        STORE,
+        "predict_scenarios",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["predict_scenarios"],
+        api_token,
+    ):
+        try:
+            real_model = _load_real_model()
+            scenarios = real_model.get_default_model().run_beam(
+                client_id=client_id,
+                start_sequence=start_sequence,
+                beam_width=beam_width,
+                horizon=horizon,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            raise ValueError(f"predict_scenarios failed: {exc}") from exc
+        payload = {
+            "client_id": client_id,
+            "scenarios": scenarios,
+            "model_version": _model_version(),
+            "decoder_config": {
+                "strategy": "beam_search",
+                "beam_width": beam_width,
+                "horizon": horizon,
+                "temperature": temperature,
+            },
+        }
+        STORE.record_latest_prediction("predict_scenarios", payload)
+        return payload
+
+
 async def healthz(_request: Request) -> JSONResponse:
     """Plain liveness probe for Docker and Vercel."""
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
@@ -116,6 +159,23 @@ async def rest_predict(request: Request) -> JSONResponse:
                 top_k=int(body.get("top_k", 5)),
                 temperature=float(body.get("temperature", 1.0)),
                 seed=body.get("seed"),
+                api_token=body.get("api_token"),
+            )
+        )
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
+
+
+async def rest_scenarios(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request)
+        return JSONResponse(
+            predict_scenarios(
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                start_sequence=body.get("start_sequence"),
+                beam_width=int(body.get("beam_width", 4)),
+                horizon=int(body.get("horizon", 16)),
+                temperature=float(body.get("temperature", 1.0)),
                 api_token=body.get("api_token"),
             )
         )
@@ -154,6 +214,7 @@ def create_app() -> Starlette:
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
             Route("/api/predict", rest_predict, methods=["POST"]),
+            Route("/api/scenarios", rest_scenarios, methods=["POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
     )
