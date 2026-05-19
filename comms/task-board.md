@@ -76,21 +76,21 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 ## Lane C — Model + tests + demo (Sherniyaz, Codex CLI)
 
 ### Monday May 18
-- [~] Clean real_model.py: lazy load ONNX session, lazy load SimulationDataset
-- [!] Smoke test: call notebook inference path through real_model.py
-- [~] Stub beam_search.py, sensor.py, tokenize_orders.py signatures
+- [X] Clean real_model.py: lazy load ONNX session, lazy load SimulationDataset
+- [X] Smoke test: call notebook inference path through real_model.py
+- [X] Stub beam_search.py, sensor.py, tokenize_orders.py signatures
 - [X] Pick the demo client and demo question, confirm with team
 
 ### Tuesday May 19
-- [~] Implement beam_search.py: top-K-of-K trajectories, joint log-prob ranking
-- [~] Verify beam search returns ranked outputs matching expected shapes from tool_schemas.py
-- [~] First pass on tokenize_orders.py: raw CSV row to token sequence
+- [X] Implement beam_search.py: top-K-of-K trajectories, joint log-prob ranking
+- [X] Verify beam search returns ranked outputs matching expected shapes from tool_schemas.py
+- [X] First pass on tokenize_orders.py: raw CSV row to token sequence
 
 ### Wednesday May 20
-- [~] Implement sensor.py: build sensor profile from product list, cache per session
-- [~] Implement anonymize_and_tokenize_orders end-to-end (uses Lane A's privacy.py + tokenize_orders)
-- [~] Pytest cases: prediction reproducibility, beam ranking, sensor swap behavior, anonymization round-trip
-- [~] Demo script v1 in docs/demo-script.md
+- [X] Implement sensor.py: build sensor profile from product list, cache per session
+- [X] Implement anonymize_and_tokenize_orders end-to-end (uses Lane A's privacy.py + tokenize_orders)
+- [X] Pytest cases: prediction reproducibility, beam ranking, sensor swap behavior, anonymization round-trip
+- [X] Demo script v1 in docs/demo-script.md
 
 ### Thursday May 21
 - [ ] Demo script v2 after team dry-run
@@ -114,3 +114,5 @@ Single source of truth for what's shipped, in progress, and next per lane. Updat
 | 2026-05-19 | A | anonymize_and_tokenize_orders + /api/anonymize | a7b1a68 |
 | 2026-05-19 | A | list_clients + list_audit_events + /api/clients + /api/audit | fdf331e |
 | 2026-05-19 | A | swift:// resources + procurement_planning_review prompt | 0eb8ae1 |
+| 2026-05-19 | C | real model handoff helpers, tests, and demo script | 5689e55 |
+| 2026-05-19 | C | real-model smoke test validated on Orkhan's Mac | 1b9341b |
