@@ -5,125 +5,94 @@
 1. Start the MCP service: `docker compose up --build mcp`
 2. Start the dashboard: `npm run dev:web`
 3. Open `http://localhost:3000`
-4. In an MCP client, connect to `http://localhost:8000/mcp` with bearer token `demo_northstar_full`
+4. In an MCP client, connect to `http://localhost:8000/mcp`
+5. Use bearer token `demo_nexus_lab_full`
 
-## Storyboard
+## Three-Minute Story
 
-1. Open the dashboard on `NSI-VAL-100`, segment `all`, 12 weeks.
-2. Run a forecast and point to forecast units, revenue, SMAPE, and MAE.
-3. Ask the agent:
-
-```text
-Use the SwiftForecast MCP server. I am visiting a Northstar Industrial customer next week.
-For tenant_northstar and SKU NSI-VAL-100, decide whether to use greedy search, beam search,
-or a longer inventory forecast. Tell me the three products I should prepare for, the demand
-scenarios behind that recommendation, and any customer risk I should know about.
-```
-
-4. Show the MCP tools:
-   - `erp_forecast_orders`
-   - `erp_beam_search_forecast`
-   - `erp_adaptive_forecast_plan`
-   - `erp_rank_at_risk_customers`
-   - `erp_anonymize_orders`
-   - `erp_trigger_retraining`
-   - `erp_get_retraining_status`
-   - `erp_list_model_versions`
-5. Show resources:
-   - `erp://dataset-card`
-   - `erp://model-card`
-   - `erp://forecast/latest`
-6. Close with the distribution story: Vercel hosts the dashboard, Supabase holds tenant metadata with RLS, and the MCP/model service runs as a container.
-
-Narration line:
+Lead with the customer question:
 
 ```text
-The model is still just a sequence forecaster: product/order history in, next tokens out. The MCP layer is what turns it into a flexible agent tool. The agent can pick greedy decoding for a single next call, beam search for alternatives, lower temperature for inventory planning, or higher temperature when it wants substitute ideas.
+NexusLab Solutions has a lab visit next week. What should procurement prepare?
+Show the likely next basket, two alternate scenarios, and whether the lab profile changes the answer.
 ```
 
-## Real CTO Model Moment
-
-If the NDA bundle is mounted, call `erp_real_sequence_forecast` for `nexus_lab_solutions`:
-
-```json
-{
-  "client_id": "nexus_lab_solutions",
-  "max_generate": 30,
-  "temperature": 1.0,
-  "top_k": 30,
-  "seed": 0,
-  "api_token": "demo_northstar_full"
-}
-```
-
-Narration line:
+Narration:
 
 ```text
-This is the provided ONNX sequence model behind the same MCP surface. We are not inspecting the protected transformation code; we mount the artifact bundle, call the public SimulationDataset interface, and let the agent steer temperature, top-k, and generation length.
+NexusLab is a chemistry research lab. Their procurement team does not want model controls.
+They want a clear answer before a supplier visit: what should be ready, what could change, and what data stayed protected.
 ```
 
-## Adaptive Forecast Call
+## Demo Flow
 
-```json
-{
-  "tenant_id": "tenant_northstar",
-  "sku": "NSI-VAL-100",
-  "objective": "I visit this customer next week. What three products should I prepare for?",
-  "recommendation_count": 3,
-  "api_token": "demo_northstar_full"
-}
-```
+1. Open the dashboard on `nexus_lab_solutions`.
+2. Run `predict_next_basket`.
+3. Point to the generated basket and time deltas.
+4. Run `predict_scenarios`.
+5. Compare ranked trajectories by joint log probability.
+6. Run `forecast_plan` with the visit question.
+7. Show the selected decoder strategy and recommendation summary.
+8. Run `personalize_client` with a short lab-profile token list.
+9. Compare before and after baskets.
+10. Run `anonymize_and_tokenize_orders`.
+11. Show hashed fields, scrubbed fields, tokenized rows, and time deltas.
+12. Close on audit events.
 
-Expected response highlights:
+## Tool Calls To Show
 
-- `selected_strategy`: `beam_search`
-- `decoder_plan`: horizon, beam width, temperature, and reason
-- `scenarios`: ranked sequence forecasts
-- `customer_risk`: anonymized risky customer refs
-- `products_to_prepare`: three product recommendations
+- `predict_next_basket`: answers the most likely next order basket.
+- `predict_scenarios`: shows ranked alternate baskets with joint log probability.
+- `forecast_plan`: lets the agent pick the decoder path from the user intent.
+- `personalize_client`: shifts the prediction with a session sensor profile.
+- `anonymize_and_tokenize_orders`: scrubs raw rows before token mapping.
+- `list_clients`: confirms the demo client.
+- `list_audit_events`: proves calls are recorded.
 
-## Retraining Moment
+Resources:
 
-1. Call `erp_forecast_orders` for `tenant_northstar`, `NSI-VAL-100`, 12 weeks and note the first forecast quantity.
-2. Call `erp_trigger_retraining` with reason `new anonymized customer orders landed overnight`.
-3. The trigger response should be `queued` and include the first loss point plus before/after metrics.
-4. Poll `erp_get_retraining_status` once. The job should be `running` with a partial deterministic loss curve.
-5. Poll `erp_get_retraining_status` again. The job should be `completed`, include the full loss curve, activate a new model version, and return a `forecast_shift`.
-6. Re-run `erp_forecast_orders`. The model version should change and the forecast should visibly shift because the tenant adapter is now active.
+- `swift://model-card`
+- `swift://dataset-card`
+- `swift://prediction/latest`
 
-Narration line:
+Prompt:
+
+- `procurement_planning_review`
+
+## Main Agent Prompt
 
 ```text
-The base model stayed frozen. The tenant adapter trained on anonymized recent orders, produced a visible loss curve, activated a new model version, and shifted the forecast without exposing raw customer identities.
+Use the SwiftForecast MCP server for client nexus_lab_solutions.
+I am visiting this lab next week. Tell me what procurement should prepare.
+Give me the likely next basket, two alternate scenarios, and a short explanation I can give the account owner.
+Before quoting uploaded rows, scrub and tokenize them.
 ```
 
-## Fallback
+Expected answer:
 
-If the MCP client is unavailable, the dashboard still renders a local forecast and the service can be shown through:
+- A basket prediction with generated tokens and time deltas.
+- Two or more scenario paths, ranked by joint log probability.
+- A plain procurement recommendation.
+- A privacy report for any uploaded rows.
+- A recent audit event for each tool call.
+
+## Fallback If A Live Tool Fails
+
+Keep the story intact. Say:
+
+```text
+The local dashboard has cached demo responses, but the server response is the source of truth.
+The panel is showing the same response shape that the MCP tool returns.
+```
+
+Then show:
 
 ```bash
 curl http://localhost:8000/healthz
-curl http://localhost:8000/.well-known/oauth-protected-resource
 ```
 
-## Customer-Risk Call
+## Closing Line
 
-```json
-{
-  "tenant_id": "tenant_northstar",
-  "sku": "NSI-VAL-100",
-  "horizon_weeks": 12,
-  "limit": 5,
-  "api_token": "demo_northstar_full"
-}
-```
-
-## Retraining Call
-
-```json
-{
-  "tenant_id": "tenant_northstar",
-  "reason": "new anonymized customer orders landed overnight",
-  "api_token": "demo_northstar_full"
-}
+```text
+The customer asks one procurement question. The agent chooses the model call, runs the decoder, protects uploaded rows, and leaves an audit trail.
 ```
