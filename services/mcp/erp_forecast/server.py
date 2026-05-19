@@ -223,6 +223,50 @@ def forecast_plan(
         return payload
 
 
+@mcp.tool()
+def personalize_client(
+    client_id: str = DEMO_TENANT_ID,
+    additional_tokens: list[str] | None = None,
+    start_sequence: list[str] | None = None,
+    max_generate: int = 32,
+    top_k: int = 5,
+    temperature: float = 1.0,
+    seed: int | None = None,
+    api_token: str | None = None,
+) -> dict[str, Any]:
+    """Build a sensor session from `additional_tokens`, then predict with it."""
+    with _AuditContext(
+        STORE,
+        "personalize_client",
+        DEMO_TENANT_ID,
+        SCOPE_FOR_TOOL["personalize_client"],
+        api_token,
+    ):
+        if not additional_tokens:
+            raise ValueError("additional_tokens must include at least one token.")
+        try:
+            sensor = _load_sensor()
+            session_id = sensor.apply_sensor(client_id, list(additional_tokens))
+            prediction = sensor.predict_with_session(
+                session_id=session_id,
+                start_sequence=start_sequence,
+                max_generate=max_generate,
+                top_k=top_k,
+                temperature=temperature,
+                seed=seed,
+            )
+        except Exception as exc:
+            raise ValueError(f"personalize_client failed: {exc}") from exc
+        payload = {
+            "session_id": session_id,
+            "client_id": client_id,
+            "additional_tokens": list(additional_tokens),
+            "prediction": prediction,
+        }
+        STORE.record_latest_prediction("personalize_client", payload)
+        return payload
+
+
 async def healthz(_request: Request) -> JSONResponse:
     """Plain liveness probe for Docker and Vercel."""
     return JSONResponse({"ok": True, "service": "swiftforecast-erp-mcp"})
@@ -292,6 +336,25 @@ async def rest_forecast_plan(request: Request) -> JSONResponse:
         return _err(exc)
 
 
+async def rest_personalize(request: Request) -> JSONResponse:
+    try:
+        body = await _read_body(request)
+        return JSONResponse(
+            personalize_client(
+                client_id=body.get("client_id", DEMO_TENANT_ID),
+                additional_tokens=body.get("additional_tokens"),
+                start_sequence=body.get("start_sequence"),
+                max_generate=int(body.get("max_generate", 32)),
+                top_k=int(body.get("top_k", 5)),
+                temperature=float(body.get("temperature", 1.0)),
+                seed=body.get("seed"),
+                api_token=body.get("api_token"),
+            )
+        )
+    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+        return _err(exc)
+
+
 class BearerAuthMiddleware:
     """Reject /mcp requests that fail bearer-token validation."""
 
@@ -325,6 +388,7 @@ def create_app() -> Starlette:
             Route("/api/predict", rest_predict, methods=["POST"]),
             Route("/api/scenarios", rest_scenarios, methods=["POST"]),
             Route("/api/forecast-plan", rest_forecast_plan, methods=["POST"]),
+            Route("/api/personalize", rest_personalize, methods=["POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
     )
