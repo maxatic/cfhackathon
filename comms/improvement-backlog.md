@@ -17,6 +17,26 @@ The standard for "improvement": every change must either make the demo more conv
 
 ---
 
+## Step 0 — Red-team your own lane before picking a task
+
+Before working any item below, spend one focused pass attacking the current MCP from your lane's angle. The list below is what Orkhan's AI already found. You will find more. The goal is to break it now, in private, so a Swiftron judge cannot break it live on Friday.
+
+Run this adversarial pass:
+
+1. Pull main, boot the server locally (`uvicorn erp_forecast.server:app --port 8000 --app-dir services/mcp` with `REAL_MODEL_ARTIFACT_DIR` set).
+2. From your lane's perspective, try to break it. Concrete attacks to attempt:
+   - Lane A: call every tool with malformed, missing, out-of-range, and adversarial input. Hit `/mcp` with a bad token, no token, expired session ids, oversized payloads. Try to force a 500 or an unhandled exception. Try to make the audit log miss a call.
+   - Lane C: feed `run_beam`, `predict_basket`, `apply_sensor`, and `anonymize_and_tokenize` with empty sequences, unknown tokens, unknown clients, beam_width 0 and 1000, horizon 0 and huge, duplicate tokens, non-ascii. Check the math: are joint_log_probs actually summed step log-probs? Does the sensor actually change the distribution or is the shift cosmetic? Does anonymize ever leak a raw field into the tokenized output?
+   - Lane B: click every panel with the server down, with the server slow, with an empty response, with a 4xx. Does the dashboard ever show stale data as if it were live? Does the status pill ever lie? Does any panel crash on an empty array?
+3. Write every weakness you find as a new item in the appropriate priority section below, using the same format (lane, description, acceptance test). Tag new items you discover with `(found by <your-lane>)`.
+4. Then start fixing, highest priority first.
+
+Do not skip Step 0. The pre-written list below is a floor, not a ceiling. A fresh AI looking at this code will see failure modes the original author did not. Surface them.
+
+When you find something genuinely broken (not just hardening, an actual bug in current behavior), also log it in `comms/blockers.md` so the team sees it immediately, then fix it.
+
+---
+
 ## Priority 1 — Things a judge will probe in Q&A
 
 These are the most likely failure points if a Swiftron engineer pushes on the demo.
