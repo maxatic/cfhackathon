@@ -2,6 +2,12 @@
 
 Single source of truth for what's shipped, in progress, and next per lane. Update on every meaningful commit. Agents read this before starting work.
 
+## BUILD COMPLETE — now in hardening phase
+
+All Monday/Tuesday/Wednesday build tasks are done. The MCP server is live on main with all 7 tools, validated end-to-end through Claude Desktop against the real Swiftron model. We have slack before Friday.
+
+Next work comes from `comms/improvement-backlog.md`. That file is a red-team queue: pick the highest-priority unclaimed item in your lane, mark it claimed there, do it on your lane branch, open a PR. Do Priority 1 items first (judge-facing risk). Do not start P3 until P1 and P2 in your lane are done.
+
 ## Status legend
 - `[ ]` not started
 - `[~]` in progress
