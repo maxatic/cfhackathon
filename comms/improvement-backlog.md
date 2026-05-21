@@ -41,11 +41,11 @@ When you find something genuinely broken (not just hardening, an actual bug in c
 
 These are the most likely failure points if a Swiftron engineer pushes on the demo.
 
-### [ ] P1-1 (Lane C) — Confirm beam search is real, not relabeled sampling
+### [~LANE-C] P1-1 (Lane C) — Confirm beam search is real, not relabeled sampling
 A judge will ask "is this actually beam search or top-k with a different name?" Read `real_model.py`'s `run_beam`. Confirm it (a) maintains multiple candidate sequences simultaneously, (b) expands each by the top tokens, (c) prunes to beam_width by cumulative log-prob, (d) the returned `joint_log_prob` is the actual sum of per-step log-probs, not a heuristic. If any of these is false, fix it so it is true. Write a test that proves a wider beam can surface a sequence that greedy top-1 would miss.
 Acceptance: a Pytest case shows `run_beam(beam_width=4)` returns at least one trajectory whose first divergent token differs from the greedy argmax, and `joint_log_prob` values are monotonically non-increasing by rank and equal to the summed step log-probs within 1e-4.
 
-### [ ] P1-2 (Lane C) — Make the sensor mechanism explainable in one sentence
+### [~LANE-C] P1-2 (Lane C) — Make the sensor mechanism explainable in one sentence
 The demo claims `personalize_client` shifts predictions via the model's sensor input. A judge will ask "what exactly does the sensor do to the model?" Read how `predict_basket(sensor_tokens=...)` feeds the ONNX `sensor_input`. Write a 5-line docstring at the top of `sensor.py` that states, truthfully, how additional_tokens become a sensor vector and why that changes the output distribution. No marketing words. If the honest answer is "it biases the sensor_input embedding toward those product tokens," say exactly that.
 Acceptance: `sensor.py` module docstring explains the mechanism in plain language, and a Pytest case shows that two different token sets produce measurably different output distributions for the same client and seed.
 
