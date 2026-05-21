@@ -1,5 +1,6 @@
 import os
 import unittest
+from math import log
 from unittest.mock import patch
 
 from erp_forecast import sensor
@@ -14,6 +15,158 @@ class FakeModel:
         if client_id != "nexus_lab_solutions":
             raise ValueError(f"Unknown client_id={client_id}.")
         return ["<unk>", "<dt_1w>", "productalpha", "benchglove"]
+
+
+class ControlledBeamModel(RealSequenceModel):
+    """Deterministic decoder proving beam search keeps competing paths."""
+
+    def __init__(self) -> None:
+        """Skip artifact loading for a pure decoder-control test."""
+
+    def _dataset_for(self, client_id: str) -> object:
+        """Return a fake dataset for the demo client.
+
+        Example:
+            `_dataset_for("nexus_lab_solutions")` returns an object.
+        """
+        if client_id != "nexus_lab_solutions":
+            raise ValueError(f"Unknown client_id={client_id}.")
+        return object()
+
+    def _resolve_start_tokens(
+        self,
+        dataset: object,
+        start_sequence: list[str] | None,
+        seed: int,
+    ) -> tuple[list[str], list[str]]:
+        """Return a fixed context for deterministic beam comparison.
+
+        Example:
+            `_resolve_start_tokens(object(), None, 42)` returns `(["history"], [])`.
+        """
+        return ["history"], []
+
+    def _prepare_decoder(self, dataset: object, seed: int, sensor_tokens: list[str] | None) -> object:
+        """Return a fake decoder state.
+
+        Example:
+            `_prepare_decoder(object(), 42, None)` returns an object.
+        """
+        return object()
+
+    def _time_candidates(self, state: object, tokens: list[str], limit: int) -> list[tuple[str, float]]:
+        """Return a greedy time token and a lower-probability alternative.
+
+        Example:
+            `_time_candidates(object(), ["history"], 1)` returns the greedy token only.
+        """
+        return [
+            ("<dt_greedy>", log(0.7)),
+            ("<dt_alt>", log(0.3)),
+        ][:limit]
+
+    def _product_candidates(
+        self,
+        state: object,
+        tokens: list[str],
+        used_global_indices: set[int],
+        temperature: float,
+        limit: int,
+    ) -> list[tuple[str, int | None, float]]:
+        """Return branch-specific product log-probs for beam proof.
+
+        Example:
+            a context containing `"<dt_alt>"` returns the alternate branch candidates.
+        """
+        time_token = next(token for token in tokens if token.startswith("<dt_"))
+        candidates_by_time = {
+            "<dt_greedy>": [
+                ("greedy_refill", 101, log(0.5)),
+                ("slow_refill", 102, log(0.2)),
+            ],
+            "<dt_alt>": [
+                ("alternate_refill", 201, log(0.99)),
+                ("alternate_tail", 202, log(0.01)),
+            ],
+        }
+        candidates = candidates_by_time[time_token]
+        return [candidate for candidate in candidates if candidate[1] not in used_global_indices][:limit]
+
+
+class SensorAwareFakeModel:
+    """Fake model that exposes a distribution shift from sensor tokens."""
+
+    def list_clients(self) -> list[str]:
+        """Return the single demo client.
+
+        Example:
+            `list_clients()` returns `["nexus_lab_solutions"]`.
+        """
+        return ["nexus_lab_solutions"]
+
+    def vocab_for_client(self, client_id: str) -> list[str]:
+        """Return two valid tokens for sensor tests.
+
+        Example:
+            `vocab_for_client("nexus_lab_solutions")` returns two fake product tokens.
+        """
+        if client_id != "nexus_lab_solutions":
+            raise ValueError(f"Unknown client_id={client_id}.")
+        return ["chem_signal", "bio_signal"]
+
+    def predict_basket(
+        self,
+        client_id: str,
+        start_sequence: list[str] | None,
+        max_generate: int = 32,
+        top_k: int = 5,
+        temperature: float = 1.0,
+        seed: int | None = None,
+        sensor_tokens: list[str] | None = None,
+    ) -> dict[str, object]:
+        """Return a distribution determined by the sensor tokens.
+
+        Example:
+            `predict_basket("nexus_lab_solutions", [], sensor_tokens=["bio_signal"])`
+            returns a payload where the biology probability is higher.
+        """
+        if sensor_tokens == ["bio_signal"]:
+            distribution = {"chem_signal": 0.2, "bio_signal": 0.8}
+            generated = ["bio_signal"]
+        else:
+            distribution = {"chem_signal": 0.85, "bio_signal": 0.15}
+            generated = ["chem_signal"]
+        return {
+            "client_id": client_id,
+            "start_sequence": start_sequence or [],
+            "generated_tokens": generated,
+            "generated_times": [0],
+            "token_distribution": distribution,
+            "model_version": "fake",
+            "decoder_config": {
+                "strategy": "sensor_profile",
+                "top_k": top_k,
+                "temperature": temperature,
+                "max_generate": max_generate,
+                "seed": seed,
+            },
+        }
+
+
+def _product_tokens(vocab: list[str], count: int) -> list[str]:
+    """Return non-time tokens without logging protected vocabulary.
+
+    Example:
+        `_product_tokens(["<dt_1w>", "a", "b"], 2)` returns `["a", "b"]`.
+    """
+    tokens: list[str] = []
+    for token in vocab:
+        token_text = str(token)
+        if token_text not in {"<unk>", "<eos>"} and not token_text.startswith("<dt_"):
+            tokens.append(token_text)
+            if len(tokens) == count:
+                break
+    return tokens
 
 
 class PrivacyAndTokenizationTests(unittest.TestCase):
@@ -95,6 +248,57 @@ class RealModelContractTests(unittest.TestCase):
             sensor.predict_with_session("session_missing", [], max_generate=2)
 
 
+class BeamSearchProofTests(unittest.TestCase):
+    def test_beam_search_keeps_alternatives_and_sums_log_probs(self) -> None:
+        """A wider beam should keep non-greedy paths and sum per-step log-probs."""
+        model = ControlledBeamModel()
+
+        greedy = model.run_beam("nexus_lab_solutions", None, beam_width=1, horizon=2)
+        wide = model.run_beam("nexus_lab_solutions", None, beam_width=4, horizon=2)
+
+        self.assertEqual(greedy[0]["tokens"], ["<dt_greedy>", "greedy_refill"])
+        self.assertTrue(any(scenario["tokens"][0] != greedy[0]["tokens"][0] for scenario in wide))
+
+        scores = [float(scenario["joint_log_prob"]) for scenario in wide]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+        expected_scores = {
+            ("<dt_greedy>", "greedy_refill"): log(0.7) + log(0.5),
+            ("<dt_alt>", "alternate_refill"): log(0.3) + log(0.99),
+            ("<dt_greedy>", "slow_refill"): log(0.7) + log(0.2),
+            ("<dt_alt>", "alternate_tail"): log(0.3) + log(0.01),
+        }
+        for scenario in wide:
+            key = tuple(scenario["tokens"])
+            self.assertAlmostEqual(float(scenario["joint_log_prob"]), expected_scores[key], delta=1e-4)
+
+
+class SensorExplainabilityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        """Clear cached sessions before each sensor test."""
+        sensor._SESSIONS.clear()
+
+    def test_different_sensor_tokens_change_distribution_for_same_seed(self) -> None:
+        """Two sensor token sets should produce different output distributions."""
+        fake_model = SensorAwareFakeModel()
+
+        with patch("erp_forecast.sensor.get_default_model", return_value=fake_model):
+            chem_session = sensor.apply_sensor("nexus_lab_solutions", ["chem_signal"])
+            bio_session = sensor.apply_sensor("nexus_lab_solutions", ["bio_signal"])
+            chem_result = sensor.predict_with_session(chem_session, [], max_generate=2, seed=9)
+            bio_result = sensor.predict_with_session(bio_session, [], max_generate=2, seed=9)
+
+        self.assertEqual(chem_result["decoder_config"]["seed"], bio_result["decoder_config"]["seed"])
+        self.assertNotEqual(chem_result["token_distribution"], bio_result["token_distribution"])
+        self.assertNotEqual(chem_result["generated_tokens"], bio_result["generated_tokens"])
+
+    def test_sensor_rejects_tokens_outside_client_vocab(self) -> None:
+        """Sensor sessions should not silently accept tokens the model ignores."""
+        with patch("erp_forecast.sensor.get_default_model", return_value=SensorAwareFakeModel()):
+            with self.assertRaisesRegex(ValueError, "vocabulary"):
+                sensor.apply_sensor("nexus_lab_solutions", ["missing_token"])
+
+
 class RealArtifactTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -157,13 +361,46 @@ class RealArtifactTests(unittest.TestCase):
     def test_sensor_session_prediction_shape(self) -> None:
         """Sensor prediction should return the same basket shape with sensor strategy."""
         sensor._SESSIONS.clear()
+        valid_tokens = _product_tokens(self.model.vocab_for_client("nexus_lab_solutions"), 1)
+        if not valid_tokens:
+            raise unittest.SkipTest("No product token is available for sensor validation.")
 
         with patch("erp_forecast.sensor.get_default_model", return_value=self.model):
-            session_id = sensor.apply_sensor("nexus_lab_solutions", ["demo_added_token"])
+            session_id = sensor.apply_sensor("nexus_lab_solutions", valid_tokens)
             result = sensor.predict_with_session(session_id, None, max_generate=2, seed=11)
 
         self.assertEqual(result["client_id"], "nexus_lab_solutions")
         self.assertEqual(result["decoder_config"]["strategy"], "sensor_profile")
+
+    def test_sensor_tokens_change_real_candidate_distribution(self) -> None:
+        """Real sensor token sets should change next-product probabilities."""
+        valid_tokens = _product_tokens(self.model.vocab_for_client("nexus_lab_solutions"), 2)
+        if len(valid_tokens) < 2:
+            raise unittest.SkipTest("Two product tokens are required for sensor distribution validation.")
+
+        first = self.model._sensor_distribution_probe(
+            "nexus_lab_solutions",
+            None,
+            [valid_tokens[0]],
+            top_k=8,
+            seed=13,
+        )
+        second = self.model._sensor_distribution_probe(
+            "nexus_lab_solutions",
+            None,
+            [valid_tokens[1]],
+            top_k=8,
+            seed=13,
+        )
+
+        first_distribution = {str(item["token"]): float(item["probability"]) for item in first}
+        second_distribution = {str(item["token"]): float(item["probability"]) for item in second}
+        compared_tokens = set(first_distribution) | set(second_distribution)
+        total_delta = sum(
+            abs(first_distribution.get(token, 0.0) - second_distribution.get(token, 0.0))
+            for token in compared_tokens
+        )
+        self.assertGreater(total_delta, 1e-9)
 
 
 if __name__ == "__main__":
