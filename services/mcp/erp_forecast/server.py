@@ -24,6 +24,19 @@ from .audit import _AuditContext
 from .auth import AuthorizationError, validate_bearer_token
 from .store import STORE
 from .tool_schemas import DEMO_TENANT_ID, SCOPE_FOR_TOOL
+from .validation import (
+    MAX_ADDITIONAL_TOKENS,
+    MAX_OBJECTIVE_TEXT_LEN,
+    MAX_START_SEQUENCE_TOKENS,
+    coerce_client_id,
+    coerce_float,
+    coerce_int,
+    coerce_optional_int,
+    coerce_raw_rows,
+    coerce_str,
+    coerce_token_list,
+    shorten_client_list_error,
+)
 
 
 mcp = FastMCP("SwiftForecast ERP", stateless_http=True, json_response=True)
@@ -54,12 +67,12 @@ def _model_version() -> str:
 
 @mcp.tool()
 def predict_next_basket(
-    client_id: str = DEMO_TENANT_ID,
-    start_sequence: list[str] | None = None,
-    max_generate: int = 32,
-    top_k: int = 5,
-    temperature: float = 1.0,
-    seed: int | None = None,
+    client_id: Any = DEMO_TENANT_ID,
+    start_sequence: Any = None,
+    max_generate: Any = 32,
+    top_k: Any = 5,
+    temperature: Any = 1.0,
+    seed: Any = None,
     api_token: str | None = None,
 ) -> dict[str, Any]:
     """Top-k autoregressive prediction. Returns ordered tokens with time deltas."""
@@ -71,6 +84,22 @@ def predict_next_basket(
         api_token,
     ):
         try:
+            client_id = coerce_client_id(client_id)
+            start_sequence = coerce_token_list(
+                start_sequence,
+                "start_sequence",
+                allow_none=True,
+                allow_empty=True,
+                max_len=MAX_START_SEQUENCE_TOKENS,
+            )
+            max_generate = coerce_int(
+                max_generate, "max_generate", default=32, minimum=1, maximum=80
+            )
+            top_k = coerce_int(top_k, "top_k", default=5, minimum=1, maximum=100)
+            temperature = coerce_float(
+                temperature, "temperature", default=1.0, minimum=0.1, maximum=2.0
+            )
+            seed = coerce_optional_int(seed, "seed")
             real_model = _load_real_model()
             result = real_model.get_default_model().predict_basket(
                 client_id=client_id,
@@ -80,19 +109,25 @@ def predict_next_basket(
                 temperature=temperature,
                 seed=seed,
             )
+        except ValueError as exc:
+            raise ValueError(
+                f"predict_next_basket failed: {shorten_client_list_error(str(exc))}"
+            ) from exc
         except Exception as exc:
-            raise ValueError(f"predict_next_basket failed: {exc}") from exc
+            raise ValueError(
+                f"predict_next_basket failed: {shorten_client_list_error(str(exc))}"
+            ) from exc
         STORE.record_latest_prediction("predict_next_basket", result)
         return result
 
 
 @mcp.tool()
 def predict_scenarios(
-    client_id: str = DEMO_TENANT_ID,
-    start_sequence: list[str] | None = None,
-    beam_width: int = 4,
-    horizon: int = 16,
-    temperature: float = 1.0,
+    client_id: Any = DEMO_TENANT_ID,
+    start_sequence: Any = None,
+    beam_width: Any = 4,
+    horizon: Any = 16,
+    temperature: Any = 1.0,
     api_token: str | None = None,
 ) -> dict[str, Any]:
     """Beam search over the decoder. Returns ranked trajectories with joint log-prob."""
@@ -104,6 +139,21 @@ def predict_scenarios(
         api_token,
     ):
         try:
+            client_id = coerce_client_id(client_id)
+            start_sequence = coerce_token_list(
+                start_sequence,
+                "start_sequence",
+                allow_none=True,
+                allow_empty=True,
+                max_len=MAX_START_SEQUENCE_TOKENS,
+            )
+            beam_width = coerce_int(
+                beam_width, "beam_width", default=4, minimum=1, maximum=8
+            )
+            horizon = coerce_int(horizon, "horizon", default=16, minimum=1, maximum=80)
+            temperature = coerce_float(
+                temperature, "temperature", default=1.0, minimum=0.1, maximum=2.0
+            )
             real_model = _load_real_model()
             scenarios = real_model.get_default_model().run_beam(
                 client_id=client_id,
@@ -112,8 +162,14 @@ def predict_scenarios(
                 horizon=horizon,
                 temperature=temperature,
             )
+        except ValueError as exc:
+            raise ValueError(
+                f"predict_scenarios failed: {shorten_client_list_error(str(exc))}"
+            ) from exc
         except Exception as exc:
-            raise ValueError(f"predict_scenarios failed: {exc}") from exc
+            raise ValueError(
+                f"predict_scenarios failed: {shorten_client_list_error(str(exc))}"
+            ) from exc
         payload = {
             "client_id": client_id,
             "scenarios": scenarios,
@@ -164,9 +220,9 @@ def _pick_forecast_strategy(objective_text: str) -> tuple[str, str]:
 
 @mcp.tool()
 def forecast_plan(
-    client_id: str = DEMO_TENANT_ID,
-    objective_text: str = "",
-    horizon_hint: int | None = None,
+    client_id: Any = DEMO_TENANT_ID,
+    objective_text: Any = "",
+    horizon_hint: Any = None,
     api_token: str | None = None,
 ) -> dict[str, Any]:
     """Adaptive planner. Picks greedy or beam from `objective_text`, then calls it."""
@@ -177,12 +233,22 @@ def forecast_plan(
         SCOPE_FOR_TOOL["forecast_plan"],
         api_token,
     ):
-        strategy, rationale = _pick_forecast_strategy(objective_text)
         try:
+            client_id = coerce_client_id(client_id)
+            objective_text = coerce_str(
+                objective_text,
+                "objective_text",
+                default="",
+                max_len=MAX_OBJECTIVE_TEXT_LEN,
+            )
+            horizon_hint_int = coerce_optional_int(
+                horizon_hint, "horizon_hint", minimum=1, maximum=80
+            )
+            strategy, rationale = _pick_forecast_strategy(objective_text)
             real_model = _load_real_model()
             model = real_model.get_default_model()
             if strategy == "beam_search":
-                horizon = max(4, min(int(horizon_hint or 12), 32))
+                horizon = max(4, min(horizon_hint_int or 12, 32))
                 inner: dict[str, Any] = {
                     "client_id": client_id,
                     "scenarios": model.run_beam(
@@ -200,7 +266,7 @@ def forecast_plan(
                     },
                 }
             else:
-                max_generate = max(4, min(int(horizon_hint or 16), 48))
+                max_generate = max(4, min(horizon_hint_int or 16, 48))
                 inner = model.predict_basket(
                     client_id=client_id,
                     start_sequence=None,
@@ -209,8 +275,14 @@ def forecast_plan(
                     temperature=1.0,
                     seed=None,
                 )
+        except ValueError as exc:
+            raise ValueError(
+                f"forecast_plan failed: {shorten_client_list_error(str(exc))}"
+            ) from exc
         except Exception as exc:
-            raise ValueError(f"forecast_plan failed: {exc}") from exc
+            raise ValueError(
+                f"forecast_plan failed: {shorten_client_list_error(str(exc))}"
+            ) from exc
 
         payload = {
             "client_id": client_id,
@@ -225,13 +297,13 @@ def forecast_plan(
 
 @mcp.tool()
 def personalize_client(
-    client_id: str = DEMO_TENANT_ID,
-    additional_tokens: list[str] | None = None,
-    start_sequence: list[str] | None = None,
-    max_generate: int = 32,
-    top_k: int = 5,
-    temperature: float = 1.0,
-    seed: int | None = None,
+    client_id: Any = DEMO_TENANT_ID,
+    additional_tokens: Any = None,
+    start_sequence: Any = None,
+    max_generate: Any = 32,
+    top_k: Any = 5,
+    temperature: Any = 1.0,
+    seed: Any = None,
     api_token: str | None = None,
 ) -> dict[str, Any]:
     """Build a sensor session from `additional_tokens`, then predict with it."""
@@ -242,9 +314,30 @@ def personalize_client(
         SCOPE_FOR_TOOL["personalize_client"],
         api_token,
     ):
-        if not additional_tokens:
-            raise ValueError("additional_tokens must include at least one token.")
         try:
+            client_id = coerce_client_id(client_id)
+            additional_tokens = coerce_token_list(
+                additional_tokens,
+                "additional_tokens",
+                allow_none=False,
+                allow_empty=False,
+                max_len=MAX_ADDITIONAL_TOKENS,
+            )
+            start_sequence = coerce_token_list(
+                start_sequence,
+                "start_sequence",
+                allow_none=True,
+                allow_empty=True,
+                max_len=MAX_START_SEQUENCE_TOKENS,
+            )
+            max_generate = coerce_int(
+                max_generate, "max_generate", default=32, minimum=1, maximum=80
+            )
+            top_k = coerce_int(top_k, "top_k", default=5, minimum=1, maximum=100)
+            temperature = coerce_float(
+                temperature, "temperature", default=1.0, minimum=0.1, maximum=2.0
+            )
+            seed = coerce_optional_int(seed, "seed")
             sensor = _load_sensor()
             session_id = sensor.apply_sensor(client_id, list(additional_tokens))
             prediction = sensor.predict_with_session(
@@ -255,8 +348,14 @@ def personalize_client(
                 temperature=temperature,
                 seed=seed,
             )
+        except ValueError as exc:
+            raise ValueError(
+                f"personalize_client failed: {shorten_client_list_error(str(exc))}"
+            ) from exc
         except Exception as exc:
-            raise ValueError(f"personalize_client failed: {exc}") from exc
+            raise ValueError(
+                f"personalize_client failed: {shorten_client_list_error(str(exc))}"
+            ) from exc
         payload = {
             "session_id": session_id,
             "client_id": client_id,
@@ -269,8 +368,8 @@ def personalize_client(
 
 @mcp.tool()
 def anonymize_and_tokenize_orders(
-    raw_rows: list[dict[str, Any]],
-    client_id: str = DEMO_TENANT_ID,
+    raw_rows: Any = None,
+    client_id: Any = DEMO_TENANT_ID,
     api_token: str | None = None,
 ) -> dict[str, Any]:
     """PII scrub raw ERP rows, then map them to the client's Swiftron vocabulary."""
@@ -282,13 +381,23 @@ def anonymize_and_tokenize_orders(
         api_token,
     ):
         try:
+            client_id = coerce_client_id(client_id)
+            raw_rows = coerce_raw_rows(raw_rows)
             tokenize_orders = _load_tokenize_orders()
             result = tokenize_orders.anonymize_and_tokenize(
                 raw_rows=raw_rows,
                 client_id=client_id,
             )
+        except ValueError as exc:
+            raise ValueError(
+                f"anonymize_and_tokenize_orders failed: "
+                f"{shorten_client_list_error(str(exc))}"
+            ) from exc
         except Exception as exc:
-            raise ValueError(f"anonymize_and_tokenize_orders failed: {exc}") from exc
+            raise ValueError(
+                f"anonymize_and_tokenize_orders failed: "
+                f"{shorten_client_list_error(str(exc))}"
+            ) from exc
         return result
 
 
@@ -315,7 +424,7 @@ def list_clients(api_token: str | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def list_audit_events(limit: int = 100, api_token: str | None = None) -> dict[str, Any]:
+def list_audit_events(limit: Any = 100, api_token: str | None = None) -> dict[str, Any]:
     """Return recent audit events recorded by tool calls on this server."""
     with _AuditContext(
         STORE,
@@ -324,6 +433,10 @@ def list_audit_events(limit: int = 100, api_token: str | None = None) -> dict[st
         SCOPE_FOR_TOOL["list_audit_events"],
         api_token,
     ):
+        try:
+            limit = coerce_int(limit, "limit", default=100, minimum=1, maximum=1000)
+        except ValueError as exc:
+            raise ValueError(f"list_audit_events failed: {exc}") from exc
         events = STORE.list_audit_events(limit=limit)
         return {
             "tenant_id": DEMO_TENANT_ID,
@@ -434,6 +547,16 @@ async def _read_body(request: Request) -> dict[str, Any]:
     return body
 
 
+_REST_HANDLED_EXCEPTIONS: tuple[type[Exception], ...] = (
+    ValueError,
+    AuthorizationError,
+    ImportError,
+    RuntimeError,
+    TypeError,
+    KeyError,
+)
+
+
 async def rest_predict(request: Request) -> JSONResponse:
     try:
         body = await _read_body(request)
@@ -441,14 +564,14 @@ async def rest_predict(request: Request) -> JSONResponse:
             predict_next_basket(
                 client_id=body.get("client_id", DEMO_TENANT_ID),
                 start_sequence=body.get("start_sequence"),
-                max_generate=int(body.get("max_generate", 32)),
-                top_k=int(body.get("top_k", 5)),
-                temperature=float(body.get("temperature", 1.0)),
+                max_generate=body.get("max_generate", 32),
+                top_k=body.get("top_k", 5),
+                temperature=body.get("temperature", 1.0),
                 seed=body.get("seed"),
                 api_token=body.get("api_token"),
             )
         )
-    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+    except _REST_HANDLED_EXCEPTIONS as exc:
         return _err(exc)
 
 
@@ -459,13 +582,13 @@ async def rest_scenarios(request: Request) -> JSONResponse:
             predict_scenarios(
                 client_id=body.get("client_id", DEMO_TENANT_ID),
                 start_sequence=body.get("start_sequence"),
-                beam_width=int(body.get("beam_width", 4)),
-                horizon=int(body.get("horizon", 16)),
-                temperature=float(body.get("temperature", 1.0)),
+                beam_width=body.get("beam_width", 4),
+                horizon=body.get("horizon", 16),
+                temperature=body.get("temperature", 1.0),
                 api_token=body.get("api_token"),
             )
         )
-    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+    except _REST_HANDLED_EXCEPTIONS as exc:
         return _err(exc)
 
 
@@ -475,12 +598,12 @@ async def rest_forecast_plan(request: Request) -> JSONResponse:
         return JSONResponse(
             forecast_plan(
                 client_id=body.get("client_id", DEMO_TENANT_ID),
-                objective_text=str(body.get("objective_text", "")),
+                objective_text=body.get("objective_text", ""),
                 horizon_hint=body.get("horizon_hint"),
                 api_token=body.get("api_token"),
             )
         )
-    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+    except _REST_HANDLED_EXCEPTIONS as exc:
         return _err(exc)
 
 
@@ -492,31 +615,28 @@ async def rest_personalize(request: Request) -> JSONResponse:
                 client_id=body.get("client_id", DEMO_TENANT_ID),
                 additional_tokens=body.get("additional_tokens"),
                 start_sequence=body.get("start_sequence"),
-                max_generate=int(body.get("max_generate", 32)),
-                top_k=int(body.get("top_k", 5)),
-                temperature=float(body.get("temperature", 1.0)),
+                max_generate=body.get("max_generate", 32),
+                top_k=body.get("top_k", 5),
+                temperature=body.get("temperature", 1.0),
                 seed=body.get("seed"),
                 api_token=body.get("api_token"),
             )
         )
-    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+    except _REST_HANDLED_EXCEPTIONS as exc:
         return _err(exc)
 
 
 async def rest_anonymize(request: Request) -> JSONResponse:
     try:
         body = await _read_body(request)
-        raw_rows = body.get("raw_rows")
-        if not isinstance(raw_rows, list):
-            raise ValueError("raw_rows must be a JSON array of objects.")
         return JSONResponse(
             anonymize_and_tokenize_orders(
-                raw_rows=raw_rows,
+                raw_rows=body.get("raw_rows"),
                 client_id=body.get("client_id", DEMO_TENANT_ID),
                 api_token=body.get("api_token"),
             )
         )
-    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+    except _REST_HANDLED_EXCEPTIONS as exc:
         return _err(exc)
 
 
@@ -524,16 +644,18 @@ async def rest_clients(request: Request) -> JSONResponse:
     try:
         body = await _read_body(request) if request.method == "POST" else {}
         return JSONResponse(list_clients(api_token=body.get("api_token")))
-    except (ValueError, AuthorizationError, ImportError, RuntimeError) as exc:
+    except _REST_HANDLED_EXCEPTIONS as exc:
         return _err(exc)
 
 
 async def rest_audit(request: Request) -> JSONResponse:
     try:
         body = await _read_body(request) if request.method == "POST" else {}
-        limit = int(body.get("limit", request.query_params.get("limit", 100)))
-        return JSONResponse(list_audit_events(limit=limit, api_token=body.get("api_token")))
-    except (ValueError, AuthorizationError) as exc:
+        limit = body.get("limit", request.query_params.get("limit", 100))
+        return JSONResponse(
+            list_audit_events(limit=limit, api_token=body.get("api_token"))
+        )
+    except _REST_HANDLED_EXCEPTIONS as exc:
         return _err(exc)
 
 
