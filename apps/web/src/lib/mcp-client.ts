@@ -17,7 +17,9 @@ import type {
   ListClientsResponse,
   PersonalizeClientResponse,
   PersonalizationResponse,
+  ResponseSource,
   ScenarioResponse,
+  SourceTagged,
 } from "./types";
 
 const SERVICE_TIMEOUT_MS = 1800;
@@ -65,12 +67,19 @@ type ServerForecastPlanResponse = {
   rationale: string;
   payload: BasketPrediction | ScenarioResponse;
   model_version: string;
-};
+} & SourceTagged;
 
-async function postMcpService<T>(path: string, input: Record<string, unknown>, fallback: () => T): Promise<T> {
+function tagSource<T extends object>(payload: T, source: ResponseSource): T & SourceTagged {
+  return {
+    ...payload,
+    response_source: source,
+  };
+}
+
+async function postMcpService<T extends object>(path: string, input: Record<string, unknown>, fallback: () => T): Promise<T & SourceTagged> {
   const endpoint = process.env.MCP_REST_URL;
   if (!endpoint) {
-    return fallback();
+    return tagSource(fallback(), "local_fallback");
   }
 
   const controller = new AbortController();
@@ -89,27 +98,34 @@ async function postMcpService<T>(path: string, input: Record<string, unknown>, f
       signal: controller.signal,
     });
   } catch {
-    return fallback();
+    return tagSource(fallback(), "local_fallback");
   } finally {
     clearTimeout(timeout);
   }
 
   if (!response.ok) {
     if (process.env.MCP_REST_STRICT !== "1") {
-      return fallback();
+      return tagSource(fallback(), "local_fallback");
     }
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
     const detail = payload.error ? `: ${payload.error}` : "";
     throw new Error(`MCP service returned ${response.status}${detail}`);
   }
 
-  return (await response.json()) as T;
+  try {
+    return tagSource((await response.json()) as T, "live_mcp");
+  } catch {
+    if (process.env.MCP_REST_STRICT === "1") {
+      throw new Error("MCP service returned invalid JSON");
+    }
+    return tagSource(fallback(), "local_fallback");
+  }
 }
 
 export async function requestClients(): Promise<ClientListResponse> {
   const endpoint = process.env.MCP_REST_URL;
   if (!endpoint) {
-    return createLocalClients();
+    return tagSource(createLocalClients(), "local_fallback");
   }
 
   const controller = new AbortController();
@@ -124,20 +140,27 @@ export async function requestClients(): Promise<ClientListResponse> {
       signal: controller.signal,
     });
   } catch {
-    return createLocalClients();
+    return tagSource(createLocalClients(), "local_fallback");
   } finally {
     clearTimeout(timeout);
   }
 
   if (!response.ok) {
     if (process.env.MCP_REST_STRICT !== "1") {
-      return createLocalClients();
+      return tagSource(createLocalClients(), "local_fallback");
     }
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(payload.error ?? `MCP service returned ${response.status}`);
   }
 
-  return normalizeClients((await response.json()) as ListClientsResponse | ClientListResponse);
+  try {
+    return normalizeClients(tagSource((await response.json()) as ListClientsResponse | ClientListResponse, "live_mcp"));
+  } catch {
+    if (process.env.MCP_REST_STRICT === "1") {
+      throw new Error("MCP service returned invalid JSON");
+    }
+    return tagSource(createLocalClients(), "local_fallback");
+  }
 }
 
 function normalizeClients(response: ListClientsResponse | ClientListResponse): ClientListResponse {
@@ -153,6 +176,7 @@ function normalizeClients(response: ListClientsResponse | ClientListResponse): C
       status: clientId === "nexus_lab_solutions" ? "demo" : "available",
       last_order_week: "from model bundle",
     })),
+    response_source: response.response_source,
   };
 }
 
@@ -175,6 +199,7 @@ function normalizeForecastPlan(response: ServerForecastPlanResponse, intent: str
     recommendation_summary: response.rationale,
     predicted_basket: predictedBasket,
     scenarios,
+    response_source: response.response_source,
   };
 }
 
@@ -192,6 +217,7 @@ function normalizePersonalization(
       `${additionalTokens.length} sensor tokens applied to this session.`,
       `Decoder strategy returned: ${response.prediction.decoder_config.strategy}.`,
     ],
+    response_source: response.response_source,
   };
 }
 
@@ -252,5 +278,6 @@ export async function requestAuditEvents(input: AuditRequest): Promise<AuditEven
   return {
     events: response.events,
     count: "count" in response ? response.count : response.events.length,
+    response_source: response.response_source,
   };
 }

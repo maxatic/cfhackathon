@@ -34,12 +34,18 @@ import type {
   ClientListResponse,
   ForecastPlanResponse,
   PersonalizationResponse,
+  ResponseSource,
   ScenarioResponse,
   ScenarioTrajectory,
 } from "@/lib/types";
 
 type ActionPanel = "plan" | "personalize" | "anonymize" | "audit";
 type LoadingAction = ActionPanel | "predict" | "scenarios" | null;
+type StatusTone = "live" | "fallback" | "working" | "error";
+type RuntimeStatus = {
+  label: string;
+  tone: StatusTone;
+};
 
 function formatDelta(days: number): string {
   if (days === 0) {
@@ -50,6 +56,14 @@ function formatDelta(days: number): string {
 
 function formatLogProb(value: number): string {
   return value.toFixed(1);
+}
+
+function statusFromSource(source: ResponseSource | undefined, liveLabel: string): RuntimeStatus {
+  if (source === "live_mcp") {
+    return { label: liveLabel, tone: "live" };
+  }
+
+  return { label: "Local fallback active", tone: "fallback" };
 }
 
 async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
@@ -150,7 +164,10 @@ export function Dashboard() {
   const [clients, setClients] = useState<ClientListResponse>(() => createLocalClients());
   const [activePanel, setActivePanel] = useState<ActionPanel>("plan");
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
-  const [status, setStatus] = useState("Local fallback ready");
+  const [status, setStatus] = useState<RuntimeStatus>({
+    label: "Local fallback active",
+    tone: "fallback",
+  });
   const [error, setError] = useState<string | null>(null);
   const [panelMessage, setPanelMessage] = useState("Forecast plan ready");
   const [panelError, setPanelError] = useState<string | null>(null);
@@ -174,10 +191,12 @@ export function Dashboard() {
         }
         if (!ignore) {
           setClients(payload);
+          setStatus(statusFromSource(payload.response_source, "Live MCP connected"));
         }
       } catch {
         if (!ignore) {
           setClients(createLocalClients());
+          setStatus({ label: "Local fallback active", tone: "fallback" });
         }
       }
     }
@@ -196,6 +215,7 @@ export function Dashboard() {
         limit: 8,
       });
       setAudit(nextAudit);
+      setStatus(statusFromSource(nextAudit.response_source, "Live MCP audit loaded"));
     } catch {
       setAudit((current) => current);
     } finally {
@@ -206,7 +226,7 @@ export function Dashboard() {
   async function runPrediction() {
     setError(null);
     setLoadingAction("predict");
-    setStatus("Calling predict_next_basket");
+    setStatus({ label: "Calling predict_next_basket", tone: "working" });
     try {
       const result = await postJson<BasketPrediction>("/api/predict", {
         client_id: clientId,
@@ -216,11 +236,11 @@ export function Dashboard() {
         seed: 42,
       });
       setPrediction(result);
-      setStatus(result.model_version === "swiftron-onnx-v1" ? "Prediction ready" : result.model_version);
+      setStatus(statusFromSource(result.response_source, "Live MCP prediction ready"));
       void refreshAuditEvents();
     } catch (caught) {
       setPrediction(createLocalBasketPrediction());
-      setStatus("Local fallback");
+      setStatus({ label: "Local fallback active", tone: "fallback" });
       setError(caught instanceof Error ? caught.message : "Prediction failed");
     } finally {
       setLoadingAction(null);
@@ -230,7 +250,7 @@ export function Dashboard() {
   async function runScenarios() {
     setError(null);
     setLoadingAction("scenarios");
-    setStatus("Calling predict_scenarios");
+    setStatus({ label: "Calling predict_scenarios", tone: "working" });
     try {
       const result = await postJson<ScenarioResponse>("/api/scenarios", {
         client_id: clientId,
@@ -239,11 +259,11 @@ export function Dashboard() {
         temperature,
       });
       setScenarios(result);
-      setStatus(`${result.scenarios.length} scenarios ready`);
+      setStatus(statusFromSource(result.response_source, `Live MCP: ${result.scenarios.length} scenarios ready`));
       void refreshAuditEvents();
     } catch (caught) {
       setScenarios(createLocalScenarios());
-      setStatus("Local fallback");
+      setStatus({ label: "Local fallback active", tone: "fallback" });
       setError(caught instanceof Error ? caught.message : "Scenario request failed");
     } finally {
       setLoadingAction(null);
@@ -262,12 +282,18 @@ export function Dashboard() {
       });
       setPlan(result);
       setPrediction(result.predicted_basket);
-      setScenarios({ client_id: result.client_id, model_version: result.predicted_basket.model_version, scenarios: result.scenarios });
+      setScenarios({
+        client_id: result.client_id,
+        model_version: result.predicted_basket.model_version,
+        scenarios: result.scenarios,
+        response_source: result.response_source,
+      });
       setPanelMessage(`Strategy selected: ${result.selected_strategy}`);
-      setStatus("Plan ready");
+      setStatus(statusFromSource(result.response_source, "Live MCP plan ready"));
       void refreshAuditEvents();
     } catch (caught) {
       setPanelError(caught instanceof Error ? caught.message : "Forecast plan failed");
+      setStatus({ label: "MCP request failed", tone: "error" });
     } finally {
       setLoadingAction(null);
     }
@@ -286,10 +312,11 @@ export function Dashboard() {
       setPersonalization(result);
       setPrediction(result.after);
       setPanelMessage(`Session ${result.session_id} updated`);
-      setStatus("Sensor profile applied");
+      setStatus(statusFromSource(result.response_source, "Live MCP sensor profile applied"));
       void refreshAuditEvents();
     } catch (caught) {
       setPanelError(caught instanceof Error ? caught.message : "Personalization failed");
+      setStatus({ label: "MCP request failed", tone: "error" });
     } finally {
       setLoadingAction(null);
     }
@@ -307,10 +334,11 @@ export function Dashboard() {
       });
       setAnonymization(result);
       setPanelMessage(`${result.audit_report.row_count} rows tokenized`);
-      setStatus("Token audit ready");
+      setStatus(statusFromSource(result.response_source, "Live MCP token audit ready"));
       void refreshAuditEvents();
     } catch (caught) {
       setPanelError(caught instanceof Error ? caught.message : "Anonymization failed");
+      setStatus({ label: "MCP request failed", tone: "error" });
     } finally {
       setLoadingAction(null);
     }
@@ -589,14 +617,14 @@ export function Dashboard() {
       <section className="main">
         <div className="topbar">
           <div>
-            <h2>NexusLab procurement forecast</h2>
+            <h2>Vendor-side B2B order forecast</h2>
             <p>
-              Predict the next order basket, compare ranked futures, and verify privacy handling before raw order rows become model tokens.
+              Plan the next NexusLab Solutions order basket, compare ranked futures, and verify privacy handling before order rows become model tokens.
             </p>
           </div>
-          <div className="status">
+          <div className={`status ${status.tone}`}>
             <span className="status-dot" />
-            {status}
+            {status.label}
           </div>
         </div>
 
