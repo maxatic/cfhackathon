@@ -99,6 +99,8 @@ Next work comes from `comms/improvement-backlog.md`. That file is a red-team que
 - [X] Demo script v1 in docs/demo-script.md
 
 ### Thursday May 21
+- [X] P1-1: prove beam search is real, not relabeled sampling
+- [X] P1-2: explain sensor personalization and prove token sets change outputs
 - [ ] Demo script v2 after team dry-run
 - [ ] Record fallback video (full 3-minute demo)
 - [ ] Final tests pass

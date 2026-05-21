@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import log
+from math import exp, log
 from os import environ, getenv
 from pathlib import Path
 from random import Random
@@ -254,6 +254,43 @@ class RealSequenceModel:
         """
         dataset = self._dataset_for(client_id)
         return list(getattr(dataset, "vocab", []))
+
+    def _sensor_distribution_probe(
+        self,
+        client_id: str,
+        start_sequence: list[str] | None,
+        sensor_tokens: list[str],
+        top_k: int = 8,
+        temperature: float = 1.0,
+        seed: int | None = None,
+    ) -> list[dict[str, object]]:
+        """Return top next-product probabilities for sensor Q&A tests.
+
+        Example:
+            `_sensor_distribution_probe("nexus_lab_solutions", [], ["token"], top_k=3)`
+            returns top product tokens with probabilities after the first time token.
+        """
+        actual_seed = _coerce_seed(seed)
+        self._validate_generation_args(max_generate=1, top_k=top_k, temperature=temperature)
+        dataset = self._dataset_for(client_id)
+        start_tokens, _public_start = self._resolve_start_tokens(dataset, start_sequence, actual_seed)
+        state = self._prepare_decoder(dataset, actual_seed, sensor_tokens)
+        time_token, _time_score = self._time_candidates(state, start_tokens, limit=1)[0]
+        candidates = self._product_candidates(
+            state,
+            [*start_tokens, time_token],
+            used_global_indices=set(),
+            temperature=temperature,
+            limit=top_k,
+        )
+        return [
+            {
+                "token": token,
+                "probability": exp(score),
+                "log_prob": round(score, 6),
+            }
+            for token, _global_index, score in candidates
+        ]
 
     def _datasets(self) -> dict[str, Any]:
         """Load protected datasets lazily through `SimulationDataset`."""
