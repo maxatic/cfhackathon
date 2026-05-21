@@ -224,6 +224,22 @@ button:disabled {
   background: var(--green);
 }
 
+.status.live .status-dot {
+  background: var(--green);
+}
+
+.status.fallback .status-dot {
+  background: var(--amber);
+}
+
+.status.working .status-dot {
+  background: var(--blue);
+}
+
+.status.error .status-dot {
+  background: var(--red);
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

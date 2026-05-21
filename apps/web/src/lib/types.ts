@@ -1,3 +1,9 @@
+export type ResponseSource = "live_mcp" | "local_fallback";
+
+export type SourceTagged = {
+  response_source?: ResponseSource;
+};
+
 export type ClientSummary = {
   client_id: string;
   display_name: string;
@@ -6,7 +12,7 @@ export type ClientSummary = {
   last_order_week: string;
 };
 
-export type ClientListResponse = {
+export type ClientListResponse = SourceTagged & {
   clients: ClientSummary[];
 };
 
@@ -20,7 +26,7 @@ export type DecoderConfig = {
   horizon?: number;
 };
 
-export type BasketPrediction = {
+export type BasketPrediction = SourceTagged & {
   client_id: string;
   start_sequence: string[];
   generated_tokens: string[];
@@ -36,14 +42,14 @@ export type ScenarioTrajectory = {
   time_deltas: number[];
 };
 
-export type ScenarioResponse = {
+export type ScenarioResponse = SourceTagged & {
   client_id: string;
   model_version: string;
   decoder_config?: DecoderConfig;
   scenarios: ScenarioTrajectory[];
 };
 
-export type ForecastPlanResponse = {
+export type ForecastPlanResponse = SourceTagged & {
   client_id: string;
   intent: string;
   selected_strategy: string;
@@ -53,7 +59,7 @@ export type ForecastPlanResponse = {
   scenarios: ScenarioTrajectory[];
 };
 
-export type PersonalizationResponse = {
+export type PersonalizationResponse = SourceTagged & {
   client_id: string;
   session_id: string;
   added_tokens: string[];
@@ -78,7 +84,7 @@ export type TokenizedOrderRow = {
   time_delta: number;
 };
 
-export type AnonymizationResponse = {
+export type AnonymizationResponse = SourceTagged & {
   client_id: string;
   tokenized: string[];
   time_deltas: number[];
@@ -99,14 +105,14 @@ export type AuditEvent = {
   error_summary?: string;
 };
 
-export type AuditEventsResponse = {
+export type AuditEventsResponse = SourceTagged & {
   events: AuditEvent[];
   count?: number;
 };
 
 export type PredictNextBasketResponse = BasketPrediction;
 export type PredictScenariosResponse = ScenarioResponse;
-export type PersonalizeClientResponse = {
+export type PersonalizeClientResponse = SourceTagged & {
   session_id: string;
   client_id: string;
   additional_tokens: string[];
@@ -115,12 +121,12 @@ export type PersonalizeClientResponse = {
 export type AnonymizeAuditReport = AnonymizationAuditReport;
 export type TokenizedRow = TokenizedOrderRow;
 export type AnonymizeAndTokenizeResponse = AnonymizationResponse;
-export type ListClientsResponse = {
+export type ListClientsResponse = SourceTagged & {
   clients: string[];
   count: number;
   model_version: string;
 };
-export type ListAuditEventsResponse = {
+export type ListAuditEventsResponse = SourceTagged & {
   tenant_id: string;
   events: AuditEvent[];
   count: number;

@@ -15,3 +15,5 @@ Rule: if you are stuck for more than 45 minutes, post here and ping the other la
   resolved-by: [LANE-B] [18:55 2026-05-18] branch preview verified at https://cf-hackathon-dashboard-jd5c7nc4z-maxatics-projects.vercel.app/
 - [LANE-B] [16:02 2026-05-18] Preview URL https://cf-hackathon-dashboard.vercel.app/ is reachable but serves the old Northstar dashboard, not `lane-b-dashboard`
   resolved-by: [LANE-B] [18:55 2026-05-18] correct branch URL verified at https://cf-hackathon-dashboard-jd5c7nc4z-maxatics-projects.vercel.app/
+- [LANE-B] [17:06 2026-05-21] Step 0 red-team found the dashboard cannot distinguish live MCP responses from local fallback responses because the REST mirror returns fallback payloads as normal 200 responses with the live model version string
+  resolved-by: [LANE-B] [17:18 2026-05-21] REST mirror tags live versus fallback responses, and the dashboard status pill reads that tag

@@ -73,6 +73,7 @@ Next work comes from `comms/improvement-backlog.md`. That file is a red-team que
 - [ ] Vercel production deploy
 - [X] Polish: loading states, error states, empty states
 - [X] Mobile responsive check (judges may glance at phone)
+- [X] P2-3: vendor-side dashboard copy and truthful live/fallback status pill
 
 ### Friday May 22
 - [ ] Demo day
@@ -122,3 +123,4 @@ Next work comes from `comms/improvement-backlog.md`. That file is a red-team que
 | 2026-05-19 | A | swift:// resources + procurement_planning_review prompt | 0eb8ae1 |
 | 2026-05-19 | C | real model handoff helpers, tests, and demo script | 5689e55 |
 | 2026-05-19 | C | real-model smoke test validated on Orkhan's Mac | 1b9341b |
+| 2026-05-21 | B | P2-3 vendor copy and live/fallback status source | pending PR |
