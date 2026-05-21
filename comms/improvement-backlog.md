@@ -69,7 +69,7 @@ Acceptance: `docs/demo-script.md` names the precise token list for the live pers
 The demo is stronger if we can show the model behaves differently for a different client. Pick one numeric client whose vocabulary and predictions look clearly distinct from the chemistry lab (e.g. `retail_hardware_store` or `retail_supermarket` if they exist in the dataset). Document a one-line contrast we can show if a judge asks "does it just always predict lab supplies?"
 Acceptance: `docs/demo-script.md` has a "contrast client" note with the client id and a sample prediction proving the model is client-specific, not a single global pattern.
 
-### [ ] P2-3 (Lane B) — Dashboard copy reflects the vendor framing
+### [~LANE-B] P2-3 (Lane B) — Dashboard copy reflects the vendor framing
 Header still says "NexusLab procurement forecast." We pivoted to the vendor/supply-planner user. Update the header and subtitle to the vendor framing. Fix the status pill that says "Local fallback ready" even when connected to the live MCP; it should reflect real connection state.
 Acceptance: header reads as a vendor-side B2B order forecast for the customer NexusLab; status pill shows live vs fallback truthfully; `npm run build:web` clean.
 
