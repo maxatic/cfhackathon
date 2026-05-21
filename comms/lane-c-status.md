@@ -12,6 +12,12 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-21 18:31
+shipped: P1-1 and P1-2 are done on `codex/lane-c-p1-qa-defense`: beam proof tests, sensor docstring, and sensor token validation.
+working: PR prep before the 19:00 dry-run.
+next: hand Orkhan the Q&A defense points, then rehearse.
+asks: Orkhan, review the PR; Maxat, no Lane C dependency.
+
 ### 2026-05-19 12:45
 shipped: rebased `lane-c-model` on `main` and force-pushed; Orkhan confirmed real smoke passes for `predict_basket` and `run_beam`.
 working: PR prep for `lane-c-model` to `main`.
