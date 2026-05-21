@@ -1,138 +1,132 @@
-# SwiftForecast MCP Hackathon Demo
+# Swiftron MCP Hackathon Demo
 
-MCP-first sequence forecasting demo for the Swifttron challenge. The core idea is not to expose one fixed "forecast this SKU" API. Instead, an AI agent talks to an MCP server that can decide how to call the sequence model for a business goal: greedy next-product prediction, beam-search scenarios, higher-temperature alternatives, longer-horizon inventory planning, or customer-visit preparation.
+An MCP server that exposes Swiftron's pretrained ONNX order-prediction model to AI agents, plus a Next.js dashboard for the demo. Built for the CF x HHN AI Hackathon (Heilbronn, May 2026).
 
-- `services/mcp`: Python FastMCP service with synthetic ERP data, autoregressive forecasts, controllable beam search, an adaptive forecast-planning tool, anonymization, retraining metadata, and Docker packaging.
-- `apps/web`: Next.js dashboard for forecast review, model status, MCP connection details, and demo orchestration.
-- `supabase`: Postgres schema, RLS policies, and seed data for the SaaS metadata layer.
-- `docs`: demo script and agent prompts.
+The model and its dataset come from Swiftron under NDA and are inference-only. We do not train, fine-tune, or retrain it. We expose its real decoding strategies and its sensor-based personalization mechanism through the Model Context Protocol so an agent can use it for procurement planning.
 
-## Challenge Scope
+- `services/mcp`: Python FastMCP service that wraps the ONNX model via Swiftron's `SimulationDataset` interface, with greedy and beam-search decoding, sensor-based personalization, PII scrub and tokenization, and an audit log.
+- `apps/web`: Next.js dashboard for procurement managers. Shows the predicted next basket, ranked scenarios, and recent tool calls against the live MCP endpoint.
+- `artifacts/`: Swiftron's NDA bundle. Gitignored. Each team member mounts their own copy via `REAL_MODEL_ARTIFACT_DIR`.
 
-Build a nanodocker-style MCP service around the provided sequence forecaster so other agents can use the model flexibly. Keep the client fixed to the seeded demo tenant and do not spend time optimizing model quality; the supplied model is intentionally an early-training checkpoint. The differentiator is the MCP/agent control layer:
+## What the MCP server exposes
 
-- Let an agent choose greedy search when it needs the single most likely next product/order.
-- Let an agent choose beam search when it needs multiple plausible future sequences.
-- Expose `beam_width` and `temperature` so the agent can trade off conservative planning vs more creative alternatives.
-- Support business tasks such as "what should I prepare for a customer visit next week?", "forecast the next 50 orders for inventory", and "which customers or products are at risk?"
-- Treat encrypted/protected model transformation code as a black box. Do not decrypt or inspect protected IP; call it only through the provided interfaces.
+Seven tools, three resources, one prompt. Tool names are locked.
 
-## CTO Bundle Findings
+### Tools
 
-The NDA folder contains the real challenge artifacts:
+| Tool | What it does |
+|------|--------------|
+| `predict_next_basket` | Autoregressive top-K sampling with uniqueness, returns the next ordered tokens with time deltas. |
+| `predict_scenarios` | Real beam search over the ONNX decoder. Returns K ranked trajectories with joint log-probability. |
+| `forecast_plan` | Adaptive entry point. The agent passes an objective in natural language, the server picks greedy or beam search and returns the chosen strategy with the result. |
+| `personalize_client` | Builds a sensor profile from extra tokens supplied by the agent, then runs prediction with that profile. This uses the model's built-in sensor mechanism. It does not retrain weights. |
+| `anonymize_and_tokenize_orders` | Scrubs PII from raw order rows, then maps them into Swiftron's vocabulary. |
+| `list_clients` | Lists the client ids the bundled dataset knows about. |
+| `list_audit_events` | Returns recent audit events for the demo tenant. |
 
-- `landing_page_model.onnx`: the sequence model.
-- `multi_client_dataset.joblib`: preloaded multi-client dataset records.
-- `hackathon_inference.ipynb`: reference inference flow.
-- `alit_backend.py` and `pyarmor_runtime_000000`: protected backend/dataset classes. Use them as a public interface only.
+Every tool call records latency, identity, API-key id, status, and any error summary through `audit.py`.
 
-The notebook's concrete setup is Python 3.11, `onnxruntime`, `numpy`, and `joblib`. It targets client `nexus_lab_solutions`, uses vector size `128`, max sequence length `512`, max catalog size `256`, and generates product/time tokens such as `<dt_1w>`, `s_goggles_basic`, and `c_reag_n_butyllithium`. Its decoder exposes the important agent knobs from the CTO pitch: `temperature`, `top_k`, `max_generate`, and a hard uniqueness constraint that prevents repeating generated products in one basket.
+### Resources and prompt
 
-The repo now includes an optional adapter tool, `erp_real_sequence_forecast`, that follows the notebook contract when the NDA bundle is mounted. The protected files are intentionally not committed.
+- `swift://model-card`
+- `swift://dataset-card`
+- `swift://prediction/latest`
+- `procurement_planning_review` (prompt)
 
-## Quick Start
+## On retraining
 
-Run the testable Python core:
+The Swiftron bundle is inference-only. There is no training loop, no weight update, no fine-tune path. Rather than fake a retraining lifecycle, we expose the model's real personalization surface: the sensor mechanism, called through `personalize_client`. The agent supplies additional tokens (recent orders, seasonal signals, customer preferences), the server builds a sensor profile, and the next prediction is conditioned on that profile. The underlying ONNX weights are unchanged.
 
-```bash
-PYTHONPATH=services/mcp python3 -m unittest discover services/mcp/tests
-```
+## Quick start
 
 Run the MCP service:
 
 ```bash
-docker compose up --build mcp
+cd services/mcp
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+uvicorn erp_forecast.server:app --reload --port 8000
 ```
 
-Run the web app:
+Run the dashboard:
 
 ```bash
 npm install
 npm run dev:web
 ```
 
-Open `http://localhost:3000`. The dashboard will use local demo forecast logic if `MCP_REST_URL` is not configured, and will call the Python service when it is available.
+Open `http://localhost:3000`.
 
-## MCP Endpoint
+Run tests:
 
-Local MCP endpoint:
+```bash
+npm run test:mcp
+```
 
-```text
+Health check:
+
+```bash
+curl http://localhost:8000/healthz
+```
+
+## Mounting the Swiftron bundle
+
+The bundle is distributed privately by the team lead. Unzip it to `<repo-root>/artifacts/` and set in `.env`:
+
+```
+REAL_MODEL_ARTIFACT_DIR=/absolute/path/to/cfhackathon/artifacts
+```
+
+The directory must contain:
+
+- `landing_page_model.onnx`
+- `multi_client_dataset.joblib`
+- `alit_backend.py`
+- `pyarmor_runtime_000000/`
+
+Verify with `git status` that none of these appear staged. The `.gitignore` blocks `*.onnx`, `*.joblib`, and the PyArmor runtime folder. If anything from `artifacts/` shows up in `git status`, fix the ignore rules before doing anything else.
+
+## MCP endpoint and auth
+
+Local endpoint:
+
+```
 http://localhost:8000/mcp
 ```
 
-Seeded tenant-scoped API key:
+Demo tenant: `nexus_lab_solutions`.
 
-```text
+Demo API key, scoped to the locked tools:
+
+```
 sk_nexus_lab_forecast_full
 ```
 
-Local alias `demo_nexus_lab_full` resolves to the same key. Seeded keys:
+Auth is a static tenant-scoped bearer token enforced per tool scope. There is no OAuth flow, no JWKS validation, no multi-tenant lookup. The demo runs one tenant.
 
-- `sk_nexus_lab_forecast_full`: tenant `nexus_lab_solutions`, scopes `forecast`, `anonymize`, `models`, `audit`
+## Example call
 
-Core tools:
-
-- `erp_forecast_orders`
-- `erp_beam_search_forecast`
-- `erp_adaptive_forecast_plan`
-- `erp_real_sequence_forecast` when `REAL_MODEL_ARTIFACT_DIR` is configured
-- `erp_rank_at_risk_customers`
-- `erp_anonymize_orders`
-- `erp_trigger_retraining`
-- `erp_get_retraining_status`
-- `erp_list_model_versions`
-- `erp_list_audit_events`
-
-Every tool call records an in-memory audit event with tool name, tenant, actor, API-key id, status, latency, timestamp, and error summary. `erp_list_audit_events` returns recent tenant-scoped events for the dashboard. Supabase persistence is intentionally left as a production extension.
-
-Retraining is a deterministic demo lifecycle: `erp_trigger_retraining` queues a job, the first `erp_get_retraining_status` poll returns `running` with a partial loss curve, and the second poll returns `completed`, activates a new tenant adapter model version, and shifts subsequent forecasts.
-
-Resources and prompt:
-
-- `erp://dataset-card`
-- `erp://model-card`
-- `erp://forecast/latest`
-- `demand_planning_review`
-
-Primary challenge demo tool:
-
-```json
-{
-  "tenant_id": "nexus_lab_solutions",
-  "objective": "I visit this customer next week. What three products should I prepare for?",
-  "recommendation_count": 3,
-  "api_token": "sk_nexus_lab_forecast_full"
-}
-```
-
-Call this through `erp_adaptive_forecast_plan`. It returns the selected decoding strategy, horizon, beam width, temperature, ranked beam scenarios, customer risk, and product recommendations.
-
-Optional real-model call after mounting the NDA bundle:
+`forecast_plan` is the primary demo tool. It is what a procurement-planning agent would call.
 
 ```json
 {
   "client_id": "nexus_lab_solutions",
-  "max_generate": 30,
-  "temperature": 1.0,
-  "top_k": 30,
-  "seed": 0,
+  "objective_text": "I visit this customer next week. What three products should I prepare for?",
   "api_token": "sk_nexus_lab_forecast_full"
 }
 ```
 
-Set `REAL_MODEL_ARTIFACT_DIR` to the folder containing `landing_page_model.onnx`, `multi_client_dataset.joblib`, `alit_backend.py`, and `pyarmor_runtime_000000`. On Apple Silicon, the provided top-level PyArmor runtime is x86_64; the Linux x86_64 runtime is the safer target for the container demo.
+The response includes the chosen decoding strategy, a short rationale, and the prediction payload.
 
-## Auth Scope
+## Deployment shape
 
-The current implementation validates static tenant-scoped API keys and enforces per-tool scopes. It also publishes protected-resource metadata and `WWW-Authenticate` challenges so agents know to send bearer credentials.
+- `apps/web`: Vercel.
+- `services/mcp`: a container host (Railway, Render, Fly.io, or Cloud Run). The MCP service is a long-running Python HTTP service and is not suited to serverless. The Swiftron bundle must be mounted into the container at the path `REAL_MODEL_ARTIFACT_DIR` points to.
 
-This demo does not implement a full OAuth authorization-code flow or Supabase JWKS validation yet. Supabase Auth/JWKS validation is the next production step; the repo should not be described as having completed OAuth login.
+## What is intentionally not in the repo
 
-## Deployment Shape
-
-- Deploy `apps/web` to Vercel.
-- Deploy `services/mcp` as a Docker service on Railway, Render, Fly.io, or Cloud Run.
-- Apply `supabase/migrations/202605170001_init.sql` to Supabase and load `supabase/seed.sql` for demo metadata.
-
-Vercel should host only the dashboard. The MCP/model service should run on a container host because it is packaged as a long-running Python HTTP service.
+- The Swiftron ONNX file, dataset, and PyArmor runtime. They are NDA-protected and live only under `artifacts/`.
+- A training or retraining pipeline. The model is inference-only.
+- Synthetic data paths in production code. The MCP server calls the real model or raises.
+- OAuth, Supabase JWKS validation, and multi-tenant scope. Out of scope for this demo.
