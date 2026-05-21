@@ -8,6 +8,8 @@ identity land in the audit log.
 
 from __future__ import annotations
 
+import logging
+import sys
 from contextlib import asynccontextmanager
 from importlib import import_module
 from os import getenv
@@ -23,7 +25,12 @@ from starlette.routing import Mount, Route
 from .audit import _AuditContext
 from .auth import AuthorizationError, validate_bearer_token
 from .store import STORE
-from .tool_schemas import DEMO_TENANT_ID, SCOPE_FOR_TOOL
+from .tool_schemas import (
+    BEAM_HORIZON_DEFAULT,
+    BEAM_HORIZON_MAX,
+    DEMO_TENANT_ID,
+    SCOPE_FOR_TOOL,
+)
 from .validation import (
     MAX_ADDITIONAL_TOKENS,
     MAX_OBJECTIVE_TEXT_LEN,
@@ -37,6 +44,29 @@ from .validation import (
     coerce_token_list,
     shorten_client_list_error,
 )
+
+
+logger = logging.getLogger("erp_forecast.server")
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+
+def _clamp_beam_horizon(requested: int, source: str) -> int:
+    """Clamp a beam-search horizon to BEAM_HORIZON_MAX. Logs a warning on clamp."""
+    if requested > BEAM_HORIZON_MAX:
+        logger.warning(
+            "horizon=%d requested via %s exceeds cap; clamping to %d to keep "
+            "beam search inside the MCP client read timeout.",
+            requested,
+            source,
+            BEAM_HORIZON_MAX,
+        )
+        return BEAM_HORIZON_MAX
+    return requested
 
 
 mcp = FastMCP("SwiftForecast ERP", stateless_http=True, json_response=True)
@@ -126,11 +156,17 @@ def predict_scenarios(
     client_id: Any = DEMO_TENANT_ID,
     start_sequence: Any = None,
     beam_width: Any = 4,
-    horizon: Any = 16,
+    horizon: Any = BEAM_HORIZON_DEFAULT,
     temperature: Any = 1.0,
     api_token: str | None = None,
 ) -> dict[str, Any]:
-    """Beam search over the decoder. Returns ranked trajectories with joint log-prob."""
+    """Beam search over the decoder. Returns ranked trajectories with joint log-prob.
+
+    Horizon defaults to BEAM_HORIZON_DEFAULT and is hard-capped at
+    BEAM_HORIZON_MAX. Callers may pass any positive integer; values above the
+    cap are clamped with a logged warning so a long horizon cannot stall the
+    server past an MCP client read timeout.
+    """
     with _AuditContext(
         STORE,
         "predict_scenarios",
@@ -150,7 +186,14 @@ def predict_scenarios(
             beam_width = coerce_int(
                 beam_width, "beam_width", default=4, minimum=1, maximum=8
             )
-            horizon = coerce_int(horizon, "horizon", default=16, minimum=1, maximum=80)
+            horizon = coerce_int(
+                horizon,
+                "horizon",
+                default=BEAM_HORIZON_DEFAULT,
+                minimum=1,
+                maximum=80,
+            )
+            horizon = _clamp_beam_horizon(horizon, "predict_scenarios.horizon")
             temperature = coerce_float(
                 temperature, "temperature", default=1.0, minimum=0.1, maximum=2.0
             )
@@ -248,7 +291,11 @@ def forecast_plan(
             real_model = _load_real_model()
             model = real_model.get_default_model()
             if strategy == "beam_search":
-                horizon = max(4, min(horizon_hint_int or 12, 32))
+                requested_horizon = horizon_hint_int or BEAM_HORIZON_DEFAULT
+                horizon = _clamp_beam_horizon(
+                    max(4, requested_horizon),
+                    "forecast_plan.horizon_hint",
+                )
                 inner: dict[str, Any] = {
                     "client_id": client_id,
                     "scenarios": model.run_beam(
@@ -510,8 +557,8 @@ def procurement_planning_review(
         "Step 1. Read resource swift://model-card to confirm which model and decoder\n"
         "strategies are available.\n"
         "\n"
-        "Step 2. Call predict_scenarios with beam_width=4 and a horizon between 12 and\n"
-        "20. Compare the ranked trajectories. Note where joint log-prob clusters and\n"
+        "Step 2. Call predict_scenarios with beam_width=4 and a horizon between 6 and\n"
+        "12. Compare the ranked trajectories. Note where joint log-prob clusters and\n"
         "where it spreads, since spread is the buying signal.\n"
         "\n"
         "Step 3. If the user mentions a change in the client's workload (a new project,\n"
@@ -583,7 +630,7 @@ async def rest_scenarios(request: Request) -> JSONResponse:
                 client_id=body.get("client_id", DEMO_TENANT_ID),
                 start_sequence=body.get("start_sequence"),
                 beam_width=body.get("beam_width", 4),
-                horizon=body.get("horizon", 16),
+                horizon=body.get("horizon", BEAM_HORIZON_DEFAULT),
                 temperature=body.get("temperature", 1.0),
                 api_token=body.get("api_token"),
             )

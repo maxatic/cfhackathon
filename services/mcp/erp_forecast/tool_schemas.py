@@ -13,6 +13,13 @@ from typing import Any, TypedDict
 # Hardcoded single demo tenant per AGENTS.md.
 DEMO_TENANT_ID = "nexus_lab_solutions"
 
+# Beam-search horizon bounds for predict_scenarios and forecast_plan.
+# Beam decoding runs `beam_width * horizon` model steps. Long horizons on CPU
+# breach MCP client read timeouts (default 60s for stdio, lower for HTTP),
+# so callers may pass any value but the server clamps it to BEAM_HORIZON_MAX.
+BEAM_HORIZON_DEFAULT = 6
+BEAM_HORIZON_MAX = 12
+
 # Scope each locked tool requires from `auth.py` API keys.
 SCOPE_FOR_TOOL: dict[str, str] = {
     "predict_next_basket": "forecast",

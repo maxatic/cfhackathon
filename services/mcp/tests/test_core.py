@@ -403,5 +403,107 @@ class RealArtifactTests(unittest.TestCase):
         self.assertGreater(total_delta, 1e-9)
 
 
+class _FakeBeamModel:
+    """Fake model that records the horizon it was asked to decode."""
+
+    def __init__(self) -> None:
+        """Track the most recent beam horizon for assertions."""
+        self.last_horizon: int | None = None
+
+    def run_beam(
+        self,
+        client_id: str,
+        start_sequence: list[str] | None,
+        beam_width: int,
+        horizon: int,
+        temperature: float,
+    ) -> list[dict[str, object]]:
+        """Return a single trivial trajectory and remember the horizon.
+
+        Example:
+            `run_beam("nexus_lab_solutions", None, 4, 6, 1.0)` returns one trajectory.
+        """
+        self.last_horizon = horizon
+        tokens = ["<dt_1w>", "productalpha"][:max(2, horizon)]
+        return [
+            {
+                "rank": 1,
+                "joint_log_prob": -1.0,
+                "tokens": tokens,
+                "time_deltas": [7] * len(tokens),
+            }
+        ]
+
+
+class BeamHorizonCapTests(unittest.TestCase):
+    """Server-level horizon defaults and clamping for beam paths."""
+
+    def test_forecast_plan_default_horizon_is_six(self) -> None:
+        """forecast_plan should drop to BEAM_HORIZON_DEFAULT when no hint is passed."""
+        from erp_forecast import real_model, server, tool_schemas
+
+        fake = _FakeBeamModel()
+        with patch.object(real_model, "get_default_model", return_value=fake):
+            payload = server.forecast_plan(
+                client_id="nexus_lab_solutions",
+                objective_text="compare scenarios for the next basket",
+                horizon_hint=None,
+            )
+
+        self.assertEqual(payload["chosen_strategy"], "beam_search")
+        self.assertEqual(
+            payload["payload"]["decoder_config"]["horizon"],
+            tool_schemas.BEAM_HORIZON_DEFAULT,
+        )
+        self.assertEqual(fake.last_horizon, tool_schemas.BEAM_HORIZON_DEFAULT)
+
+    def test_forecast_plan_clamps_excessive_hint(self) -> None:
+        """horizon_hint above BEAM_HORIZON_MAX should be clamped, not raised."""
+        from erp_forecast import real_model, server, tool_schemas
+
+        fake = _FakeBeamModel()
+        with patch.object(real_model, "get_default_model", return_value=fake):
+            payload = server.forecast_plan(
+                client_id="nexus_lab_solutions",
+                objective_text="list alternatives over a long horizon",
+                horizon_hint=64,
+            )
+
+        self.assertEqual(
+            payload["payload"]["decoder_config"]["horizon"],
+            tool_schemas.BEAM_HORIZON_MAX,
+        )
+        self.assertEqual(fake.last_horizon, tool_schemas.BEAM_HORIZON_MAX)
+
+    def test_predict_scenarios_default_horizon_is_six(self) -> None:
+        """predict_scenarios with no horizon argument should use BEAM_HORIZON_DEFAULT."""
+        from erp_forecast import real_model, server, tool_schemas
+
+        fake = _FakeBeamModel()
+        with patch.object(real_model, "get_default_model", return_value=fake):
+            payload = server.predict_scenarios(client_id="nexus_lab_solutions")
+
+        self.assertEqual(
+            payload["decoder_config"]["horizon"], tool_schemas.BEAM_HORIZON_DEFAULT
+        )
+        self.assertEqual(fake.last_horizon, tool_schemas.BEAM_HORIZON_DEFAULT)
+
+    def test_predict_scenarios_clamps_caller_horizon(self) -> None:
+        """A caller passing horizon=40 should still be clamped to BEAM_HORIZON_MAX."""
+        from erp_forecast import real_model, server, tool_schemas
+
+        fake = _FakeBeamModel()
+        with patch.object(real_model, "get_default_model", return_value=fake):
+            payload = server.predict_scenarios(
+                client_id="nexus_lab_solutions",
+                horizon=40,
+            )
+
+        self.assertEqual(
+            payload["decoder_config"]["horizon"], tool_schemas.BEAM_HORIZON_MAX
+        )
+        self.assertEqual(fake.last_horizon, tool_schemas.BEAM_HORIZON_MAX)
+
+
 if __name__ == "__main__":
     unittest.main()
