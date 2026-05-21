@@ -12,6 +12,28 @@ asks: what I need from other lanes (if anything, else "none")
 
 ---
 
+### 2026-05-21 15:30
+shipped: Step 0 red-team pass on Lane A surface (logged 6 bugs in blockers.md, none was a 500). P1-3 hardened every tool against bad input through a new validation.py with coercion helpers; type and bound checks now run inside the audit context, so failures the REST wrappers used to swallow (int/float casts) land in list_audit_events with status=error and a readable message. Trimmed the bad-client error so it no longer dumps all 169 client ids. P1-4 added services/mcp/scripts/bench_tools.py and ran it against the live server; ONNX session and SimulationDataset stay cached across calls.
+working: opening PR from lane-a-server for review.
+next: hand off to Orkhan for PR review; do not merge.
+asks: none.
+
+Warm latency table (services/mcp/scripts/bench_tools.py, one warm-up + 3 samples, REAL_MODEL on Orkhan's Mac, budget 1500ms):
+
+```
+tool                                   warm-up        p50        p95        max
+--------------------------------------------------------------------------------
+predict_next_basket                     144.5ms     137.2ms     140.9ms     140.9ms
+predict_scenarios                       440.3ms     450.6ms     451.2ms     451.2ms
+forecast_plan                           613.1ms     585.4ms     596.6ms     596.6ms
+personalize_client                      100.3ms     102.0ms     102.2ms     102.2ms
+anonymize_and_tokenize_orders             1.5ms       1.0ms       1.2ms       1.2ms
+list_clients                              0.6ms       0.5ms       0.5ms       0.5ms
+list_audit_events                         0.6ms       0.7ms       0.7ms       0.7ms
+```
+
+Every warm call is well under the 1.5s budget. Forecast_plan tops out at ~625ms because it currently routes to beam search on this objective; the per-call cost matches predict_scenarios + plan overhead, which is what we want.
+
 ### 2026-05-19 10:00
 shipped: nothing yet today, Monday work pushed last night to lane-a-server.
 working: drafting tool_schemas.py + store.py + scaffolding server.py for the 6 locked tools per handoffs 1-5. Will wire predict_next_basket and predict_scenarios first since Lane C's real_model.py is validated on this Mac.
