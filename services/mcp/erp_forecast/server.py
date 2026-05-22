@@ -69,7 +69,7 @@ def _clamp_beam_horizon(requested: int, source: str) -> int:
     return requested
 
 
-mcp = FastMCP("SwiftForecast ERP", stateless_http=True, json_response=True)
+mcp = FastMCP("SwiftForecast ERP")
 
 
 def _load_real_model() -> Any:
